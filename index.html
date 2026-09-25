@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liga Pokémon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Work+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<!-- Degradados compartidos por todas las insignias (MVP, Asistente, DPOY, 6th Pokémon, ALL-GBA 1st/2nd Team) -->
+<svg width="0" height="0" style="position: absolute;">
+  <defs>
+    <radialGradient id="gGold" cx="35%" cy="30%" r="75%"><stop offset="0%" stop-color="#FFD23F"/><stop offset="55%" stop-color="#F5B700"/><stop offset="100%" stop-color="#B9840A"/></radialGradient>
+    <radialGradient id="gBlue" cx="35%" cy="30%" r="75%"><stop offset="0%" stop-color="#8FE1FA"/><stop offset="55%" stop-color="#4CC9F0"/><stop offset="100%" stop-color="#2C7FA8"/></radialGradient>
+    <radialGradient id="gTeal" cx="35%" cy="30%" r="75%"><stop offset="0%" stop-color="#7ED4BC"/><stop offset="55%" stop-color="#3E6F64"/><stop offset="100%" stop-color="#234A42"/></radialGradient>
+    <radialGradient id="gViolet" cx="35%" cy="30%" r="75%"><stop offset="0%" stop-color="#C3C6E0"/><stop offset="55%" stop-color="#9296AD"/><stop offset="100%" stop-color="#5A5E78"/></radialGradient>
+    <radialGradient id="gRed" cx="35%" cy="30%" r="75%"><stop offset="0%" stop-color="#F58A93"/><stop offset="55%" stop-color="#E63946"/><stop offset="100%" stop-color="#9A2530"/></radialGradient>
+  </defs>
+</svg>
+
+<div class="site">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-dot"></div>
+      <div class="brand-text" id="brand-text">LIGA</div>
+    </div>
+    <nav class="mainnav">
+      <a data-tab="inicio" href="#inicio">Inicio</a>
+      <a data-tab="equipos" href="#equipos">Equipos</a>
+      <a data-tab="clasificacion" href="#clasificacion">Clasificación</a>
+      <a data-tab="jornadas" href="#jornadas">Jornadas</a>
+      <a data-tab="insignias" href="#insignias">Insignias</a>
+      <a data-tab="historia" href="#historia">Historia</a>
+    </nav>
+  </header>
+
+  <main id="app">
+    <div class="loading">
+      <div class="loading-title">Cargando datos del reto…</div>
+      <div class="loading-sub">Leyendo el Google Sheet</div>
+    </div>
+  </main>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
