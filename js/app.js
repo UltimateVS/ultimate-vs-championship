@@ -352,24 +352,31 @@
     const cards = DB.teamOrder.map(sig => {
       const t = T(sig); const bj = DB.stand[sig].byJ[j] || { pts: 0, made: 0, recv: 0 };
       const mine = J.enfs.filter(e => e.local.includes(sig) || e.visit.includes(sig));
+      // Cada enfrentamiento del equipo, en orden de calendario: local a la izquierda, visitante a la derecha (siglas + logos)
+      const sideHtml = (sigs, right) => `<div style="display: flex; flex-direction: column; gap: 3px; ${right ? 'align-items: flex-end;' : 'align-items: flex-start;'}">${sigs.map(x => {
+        const nm = `<span style="${x === sig ? 'color: #F4F1EA; font-weight: 700;' : 'color: #9296AD; font-weight: 600;'}">${esc(x)}</span>`;
+        return `<div style="display: flex; align-items: center; gap: 5px; font-size: 11px; white-space: nowrap;">${right ? nm + logo(x, 14) : logo(x, 14) + nm}</div>`;
+      }).join('')}</div>`;
       const items = mine.map(e => {
         const me = e.local.includes(sig) ? 'Local' : 'Visitante'; const op = me === 'Local' ? 'Visitante' : 'Local';
-        const rivals = me === 'Local' ? e.visit : e.local;
-        const rl = rivals.map(r => logo(r, 14)).join('');
-        const vs = `vs ${esc(rivals.map(r => T(r).short).join(' & '))}`;
-        if (!e.hasData) {
-          return `<div style="background: #232640; border-radius: 6px; padding: 8px 10px; opacity: 0.55;"><div style="display: flex; justify-content: space-between; align-items: center;"><div style="display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;">${rl}${vs}</div><div style="font-size: 10px; color: #9296AD;">pendiente</div></div></div>`;
-        }
         const done = e.state === 'jugado'; const won = done && e.winner === me;
-        const c = !done ? '#F5B700' : won ? '#4CC9F0' : '#E63946';
-        const combates = e.combats.filter(cb => cb.winner).map(cb => `<div style="display: flex; justify-content: space-between; font-size: 10px; color: #9296AD;"><span>Combate ${cb.n}</span><span style="color: #D8D9E3;">${cb.kos[me]}–${cb.kos[op]}</span></div>`).join('');
-        return `<a onclick="go('jornadas/${e.id}')" style="display: block; text-decoration: none; color: inherit; background: ${hexA(c, 0.06)}; border-left: 3px solid ${c}; border-radius: 6px; padding: 8px 10px; cursor: pointer;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;">${rl}${vs}</div>
-            <div style="display: flex; align-items: center; gap: 6px;"><div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 12px; color: ${c};">${e.w[me]}–${e.w[op]}</div><div style="font-size: 10px; color: ${c};">↗</div></div>
+        const has = e.hasData;
+        const c = !has ? '#9296AD' : !done ? '#F5B700' : won ? '#4CC9F0' : '#E63946';
+        const center = has
+          ? `<div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 12px; color: ${c}; text-align: center;">${e.w.Local}–${e.w.Visitante}</div>`
+          : `<div style="font-size: 10px; color: #4A4E63; font-weight: 600; text-align: center;">vs</div>`;
+        const status = !has ? 'pendiente' : !done ? 'en curso' : `+${e.pts[me]} pts`;
+        const combates = e.combats.filter(cb => cb.winner).map(cb => `<div style="display: flex; justify-content: space-between; font-size: 10px; color: #9296AD;"><span>Combate ${cb.n}</span><span style="color: #D8D9E3;">${cb.kos.Local}–${cb.kos.Visitante}</span></div>`).join('');
+        const box = has
+          ? `background: ${hexA(c, 0.06)}; border-left: 3px solid ${c};`
+          : 'background: #232640; opacity: 0.55;';
+        return `<a onclick="go('jornadas/${e.id}')" style="display: block; text-decoration: none; color: inherit; ${box} border-radius: 6px; padding: 8px 10px; cursor: pointer;">
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr); align-items: center; gap: 4px;">${sideHtml(e.local, false)}${center}${sideHtml(e.visit, true)}</div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px; font-size: 10px;">
+            <span style="color: #9296AD;">Enfrentamiento ${e.n}${e.duo ? ' · 2vs2' : ''}</span>
+            <span style="color: ${has ? c : '#9296AD'}; font-weight: ${has ? 700 : 400};">${status}${has ? ' ↗' : ''}</span>
           </div>
-          <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 2px;">${combates}</div>
-          <div style="text-align: right; font-size: 11px; font-weight: 700; color: ${c}; margin-top: 6px;">${done ? `+${e.pts[me]} pts` : 'en curso'}</div>
+          ${combates ? `<div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; gap: 2px;">${combates}</div>` : ''}
         </a>`;
       }).join('');
       const dif = bj.made - bj.recv;
