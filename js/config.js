@@ -5,7 +5,7 @@
 window.RETO_CONFIG = {
   // ID de tu Google Sheet: es el trozo de la URL entre /d/ y /edit
   // https://docs.google.com/spreadsheets/d/ESTO_ES_EL_ID/edit#gid=0
-  SHEET_ID: 'PEGA_AQUI_EL_ID_DE_TU_GOOGLE_SHEET',
+  SHEET_ID: '1nV30KzIljsPmU7XAyhFN-_ftD-kQOgU3WVvUs-9v1iE',
 
   // Carpeta de sprites y logos dentro del repo (no hace falta cambiarlo)
   ASSETS: 'assets',
