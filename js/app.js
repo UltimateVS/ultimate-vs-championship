@@ -490,7 +490,7 @@
   const replayUrl = v => /^https?:\/\//i.test(v) ? v : `replays/${encodeURIComponent(v.replace(/^\.?\/?replays\//i, ''))}`;
   function replayButton(e) {
     const reps = e.replays.map((u, i) => u ? { u: replayUrl(u), i: i + 1 } : null).filter(Boolean);
-    const title = n => `Enfrentamiento ${e.n} · Combate ${n} · ${coaches(e.local)} vs ${coaches(e.visit)}`;
+    const title = n => `Enfrentamiento ${e.n} · Combate ${n} · ${e.local.join(' & ')} vs ${e.visit.join(' & ')}`;
     if (reps.length === 1) return `<div class="replay-btn" onclick="openReplay('${esc(reps[0].u)}', '${esc(title(reps[0].i))}')">▶ Ver repetición</div>`;
     if (reps.length > 1) return `<div class="replay-wrap"><div class="replay-btn" onclick="toggleReplays(event)">▶ Ver repetición ▾</div><div class="replay-menu" id="replay-menu">${reps.map(r => `<a onclick="openReplay('${esc(r.u)}', '${esc(title(r.i))}')">▶ Combate ${r.i}</a>`).join('')}</div></div>`;
     return '';
@@ -558,7 +558,7 @@
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
         <div>
           <div style="font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: #F5B700; font-weight: 600;">${label}</div>
-          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; font-weight: 700; margin-top: 4px;">${esc(coaches(e.local))} vs ${esc(coaches(e.visit))}</div>
+          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; font-weight: 700; margin-top: 4px;">${esc(e.local.join(' & '))} vs ${esc(e.visit.join(' & '))}</div>
         </div>
         <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">${enfToggle(e)}${replayBtn}</div>
       </div>
@@ -577,7 +577,7 @@
 
   function enfPanel(e) {
     if (isHidden(e)) return lockedPanel(e);
-    const sideName = (sigs) => coaches(sigs);
+    const sideName = (sigs) => sigs.join(' & ');
     const played = e.combats.filter(c => c.winner);
     const done = e.state === 'jugado';
     const twoZero = done && played.length === 2;

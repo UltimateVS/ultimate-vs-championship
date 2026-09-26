@@ -7,7 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Work+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="css/styles.css">
+<!-- Carga siempre la última versión de estilos y scripts (evita que el navegador use una copia antigua) -->
+<script>document.write('<link rel="stylesheet" href="css/styles.css?v=' + Date.now() + '">');</script>
 </head>
 <body>
 
@@ -46,8 +47,13 @@
   </main>
 </div>
 
-<script src="js/config.js"></script>
-<script src="js/data.js"></script>
-<script src="js/app.js"></script>
+<script>
+  (function () {
+    var v = Date.now();
+    ['js/config.js', 'js/data.js', 'js/app.js'].forEach(function (src) {
+      document.write('<script src="' + src + '?v=' + v + '"><\/script>');
+    });
+  })();
+</script>
 </body>
 </html>
