@@ -43,7 +43,7 @@
   }
 
   /* ---------------- navegación (hash) ---------------- */
-  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false };
+  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set() };
 
   function route() {
     const [tab, arg] = (location.hash.replace('#', '') || 'inicio').split('/');
@@ -135,7 +135,7 @@
           <div style="font-size: 12px; font-weight: 600; text-align: center;">${sigs.length > 1 ? esc(sigs.map(s => T(s).short).join(' & ')) : esc(T(sigs[0]).name)}</div>
           <div style="font-size: 11px; color: #9296AD;">${esc(coaches(sigs))}</div>
         </div>`;
-      const rep = le.replays.some(Boolean) ? ' · replay disponible' : '';
+      const rep = le.replays.some(Boolean) ? ' · repetición disponible' : '';
       last = `
         <div style="font-size: 12px; color: #9296AD; letter-spacing: 1px; text-transform: uppercase;">Jornada ${le.j} · ${jLabel(le.j)}${le.date ? ' · ' + fmtDay(le.date) : ''}</div>
         <div style="display: flex; align-items: center; justify-content: center; gap: 16px; padding: 12px 0;">
@@ -146,7 +146,7 @@
           ${side(le.visit)}
         </div>
         ${state.lastReveal
-          ? `<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;"><div style="font-size: 13px; color: #9296AD;">${le.kos.Local}–${le.kos.Visitante} KOs${rep}</div><a onclick="toggleLast()" style="font-size: 12px; font-weight: 600; color: #9296AD;">🙈 Ocultar</a></div>`
+          ? `<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;"><div style="font-size: 13px; color: #9296AD;">${rep ? '▶ repetición disponible' : ''}</div><a onclick="toggleLast()" style="font-size: 12px; font-weight: 600; color: #9296AD;">🙈 Ocultar</a></div>`
           : `<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;"><div style="font-size: 13px; color: #9296AD;">🔒 Resultado oculto</div><div onclick="toggleLast()" class="clickable" style="padding: 7px 14px; border-radius: 20px; background: rgba(245,183,0,0.12); border: 1px solid #F5B700; color: #F5B700; font-size: 12px; font-weight: 700; white-space: nowrap;">👀 Ver resultado</div></div>`}
         <a onclick="go('jornadas/${le.id}')" style="font-size: 13px; font-weight: 600;">Ver detalle →</a>`;
     } else {
@@ -466,17 +466,61 @@
       </span>
     </div>`;
   }
-  window.toggleSpoiler = () => { state.spoiler = !state.spoiler; state.combat = null; render(); };
+  window.toggleSpoiler = () => { state.spoiler = !state.spoiler; state.revealed.clear(); state.combat = null; render(); };
+  // Antispoiler de cada enfrentamiento: solo cuenta si el general está activado
+  const isHidden = e => state.spoiler && !state.revealed.has(e.id);
+  window.toggleEnfSpoiler = id => { if (!state.spoiler) return; if (state.revealed.has(id)) state.revealed.delete(id); else state.revealed.add(id); state.combat = null; render(); };
+  function enfToggle(e) {
+    const disabled = !state.spoiler; const on = isHidden(e);
+    const tip = disabled ? 'Sin efecto: el antispoiler general está desactivado' : (on ? 'Resultado oculto · toca para ver este enfrentamiento' : 'Resultado visible · toca para volver a ocultarlo');
+    return `<div ${disabled ? '' : `onclick="toggleEnfSpoiler('${e.id}')"`} class="${disabled ? '' : 'clickable'}" title="${tip}" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-radius: 20px; background: ${on ? 'rgba(245,183,0,0.12)' : '#1B1D2B'}; border: 1px solid ${on ? '#F5B700' : 'rgba(255,255,255,0.08)'};${disabled ? ' opacity: 0.4;' : ''} user-select: none; white-space: nowrap;">
+      <span style="font-size: 12px;">${on ? '🙈' : '👀'}</span>
+      <span style="font-size: 12px; font-weight: 700; color: ${on ? '#F5B700' : '#9296AD'};">Antispoiler</span>
+      <span style="font-size: 10px; font-weight: 600; color: ${on ? '#F5B700' : '#4A4E63'}; width: 20px;">${on ? 'ON' : 'OFF'}</span>
+      <span style="position: relative; width: 30px; height: 16px; border-radius: 8px; background: ${on ? '#F5B700' : '#4A4E63'}; flex-shrink: 0;"><span style="position: absolute; top: 2px; ${on ? 'right: 2px' : 'left: 2px'}; width: 12px; height: 12px; border-radius: 50%; background: ${on ? '#12131C' : '#F4F1EA'};"></span></span>
+    </div>`;
+  }
   window.setJor = j => { state.jor = j; state.enf = null; state.combat = null; state.sideExpanded = false; render(); };
   window.expandSide = () => { state.sideExpanded = true; render(); };
   window.setEnf = id => { state.enf = id; state.combat = null; render(); };
   window.setCombat = n => { state.combat = state.combat === n ? null : n; render(); };
+  /* ---------- Repeticiones de Showdown (1 por combate) ----------
+     En el sheet (Jornadas → Replay combate N) se pone el NOMBRE del archivo .html descargado de Showdown,
+     guardado en la carpeta replays/ del repo; o un enlace completo https://... */
+  const replayUrl = v => /^https?:\/\//i.test(v) ? v : `replays/${encodeURIComponent(v.replace(/^\.?\/?replays\//i, ''))}`;
+  function replayButton(e) {
+    const reps = e.replays.map((u, i) => u ? { u: replayUrl(u), i: i + 1 } : null).filter(Boolean);
+    const title = n => `Enfrentamiento ${e.n} · Combate ${n} · ${coaches(e.local)} vs ${coaches(e.visit)}`;
+    if (reps.length === 1) return `<div class="replay-btn" onclick="openReplay('${esc(reps[0].u)}', '${esc(title(reps[0].i))}')">▶ Ver repetición</div>`;
+    if (reps.length > 1) return `<div class="replay-wrap"><div class="replay-btn" onclick="toggleReplays(event)">▶ Ver repetición ▾</div><div class="replay-menu" id="replay-menu">${reps.map(r => `<a onclick="openReplay('${esc(r.u)}', '${esc(title(r.i))}')">▶ Combate ${r.i}</a>`).join('')}</div></div>`;
+    return '';
+  }
+  window.openReplay = (url, title) => {
+    closeReplay();
+    const m = document.createElement('div');
+    m.id = 'replay-modal';
+    m.innerHTML = `<div class="replay-modal-box">
+        <div class="replay-modal-head">
+          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700;">▶ ${title}</div>
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <a href="${url}" target="_blank" rel="noopener" style="font-size: 12px; font-weight: 600;">Abrir en pestaña nueva ↗</a>
+            <div onclick="closeReplay()" class="clickable" title="Cerrar" style="width: 30px; height: 30px; border-radius: 50%; background: #232640; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #F4F1EA;">✕</div>
+          </div>
+        </div>
+        <iframe src="${url}" title="Repetición" style="flex: 1; width: 100%; border: 0; background: #FFFFFF; border-radius: 0 0 14px 14px;"></iframe>
+      </div>`;
+    m.addEventListener('click', ev => { if (ev.target === m) closeReplay(); });
+    document.body.appendChild(m);
+    document.body.style.overflow = 'hidden';
+  };
+  window.closeReplay = () => { const m = document.getElementById('replay-modal'); if (m) m.remove(); document.body.style.overflow = ''; };
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeReplay(); });
   window.toggleReplays = ev => { ev.stopPropagation(); document.getElementById('replay-menu').classList.toggle('open'); };
   document.addEventListener('click', () => { const m = document.getElementById('replay-menu'); if (m) m.classList.remove('open'); });
 
   function sideCard(e, J) {
     const sel = e.id === state.enf && J.hasData;
-    const score = e.hasData && !state.spoiler ? `<div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px;">${e.w.Local}–${e.w.Visitante}</div>` : `<div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px; color: #9296AD;">vs</div>`;
+    const score = e.hasData && !isHidden(e) ? `<div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px;">${e.w.Local}–${e.w.Visitante}</div>` : `<div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px; color: #9296AD;">vs</div>`;
     // Siglas del equipo grandes y en negrita; nombre del entrenador más pequeño y apagado
     const SIG = x => `<span style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: #F4F1EA; letter-spacing: 0.3px;">${esc(x)}</span>`;
     const AMP = '<span style="font-size: 12px; color: #9296AD; font-weight: 500;">&amp;</span>';
@@ -492,9 +536,9 @@
       right = row(`${SIG(e.visit[0])}${DOT}${COACH(e.visit[0])}${logo(e.visit[0], 20)}`);
     }
     let st = 'pendiente', stColor = '#9296AD';
-    if (e.state === 'jugado') st = e.replays.some(Boolean) ? 'replay disponible' : 'jugado';
+    if (e.state === 'jugado') st = e.replays.some(Boolean) ? 'repetición disponible' : 'jugado';
     else if (e.state === 'curso' || e.hasData) { st = `en curso (${e.combats.filter(c => c.winner).length}/3 combates)`; stColor = '#F5B700'; }
-    if (state.spoiler) { st = '🔒 oculto'; stColor = '#9296AD'; }
+    if (isHidden(e)) { st = '🔒 oculto'; stColor = '#9296AD'; }
     const dim = J.hasData ? '' : ' opacity: 0.55;';
     return `<div onclick="${J.hasData ? `setEnf('${e.id}')` : ''}" class="${J.hasData ? 'clickable' : ''}" style="background: #1B1D2B; border: 1px solid ${sel ? '#F5B700' : 'rgba(255,255,255,0.08)'}; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px;${dim}">
       <div style="display: flex; justify-content: space-between; align-items: center;">${left}${score}${right}</div>
@@ -509,32 +553,30 @@
         <div style="font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #9296AD;">Combate ${n}</div>
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #4A4E63;">🔒 oculto</div>
       </div>`).join('');
-    const reps = e.replays.map((u, i) => u ? { u, i: i + 1 } : null).filter(Boolean);
-    let replayBtn = '';
-    if (reps.length === 1) replayBtn = `<a class="replay-btn" href="${esc(reps[0].u)}" target="_blank" rel="noopener">▶ Ver repeticiones</a>`;
-    else if (reps.length > 1) replayBtn = `<div class="replay-wrap"><div class="replay-btn" onclick="toggleReplays(event)">▶ Ver repeticiones</div><div class="replay-menu" id="replay-menu">${reps.map(r => `<a href="${esc(r.u)}" target="_blank" rel="noopener">▶ Combate ${r.i}</a>`).join('')}</div></div>`;
+    const replayBtn = replayButton(e);
     return `<div style="flex: 1; min-width: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 16px;">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
         <div>
           <div style="font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: #F5B700; font-weight: 600;">${label}</div>
           <div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; font-weight: 700; margin-top: 4px;">${esc(coaches(e.local))} vs ${esc(coaches(e.visit))}</div>
         </div>
-        ${replayBtn}
+        <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">${enfToggle(e)}${replayBtn}</div>
       </div>
       <div style="display: flex; gap: 10px;">${cards}</div>
       <div style="flex: 1; display: flex; align-items: center; justify-content: center; min-height: 420px;">
         <div style="text-align: center; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
           <div style="font-size: 34px;">🙈</div>
           <div style="font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 700; color: #F4F1EA;">Antispoiler activado</div>
-          <div style="font-size: 13px; color: #9296AD; line-height: 1.5;">Marcadores, combates y equipos están ocultos para que nadie se entere antes de tiempo. Puedes moverte entre jornadas y enfrentamientos con total tranquilidad.</div>
-          <div onclick="toggleSpoiler()" class="clickable" style="margin-top: 6px; padding: 9px 18px; border-radius: 20px; background: #F5B700; color: #12131C; font-size: 13px; font-weight: 700;">Desactivar antispoiler y ver resultados</div>
+          <div style="font-size: 13px; color: #9296AD; line-height: 1.5;">Marcadores, combates y equipos de este enfrentamiento están ocultos. Puedes moverte entre jornadas y enfrentamientos sin ver nada hasta que decidas destaparlo.</div>
+          <div onclick="toggleEnfSpoiler('${e.id}')" class="clickable" style="margin-top: 6px; padding: 9px 18px; border-radius: 20px; background: #F5B700; color: #12131C; font-size: 13px; font-weight: 700;">👀 Ver este enfrentamiento</div>
+          <div style="font-size: 11px; color: #4A4E63;">Para verlo todo de golpe, desactiva el antispoiler general (arriba a la derecha)</div>
         </div>
       </div>
     </div>`;
   }
 
   function enfPanel(e) {
-    if (state.spoiler) return lockedPanel(e);
+    if (isHidden(e)) return lockedPanel(e);
     const sideName = (sigs) => coaches(sigs);
     const played = e.combats.filter(c => c.winner);
     const done = e.state === 'jugado';
@@ -560,10 +602,7 @@
     }
     if (state.combat) title += ` <span style="font-size: 14px; font-weight: 600; color: #9296AD;">— así estaba el equipo en el Combate ${state.combat}</span>`;
 
-    const reps = e.replays.map((u, i) => u ? { u, i: i + 1 } : null).filter(Boolean);
-    let replayBtn = '';
-    if (reps.length === 1) replayBtn = `<a class="replay-btn" href="${esc(reps[0].u)}" target="_blank" rel="noopener">▶ Ver repeticiones</a>`;
-    else if (reps.length > 1) replayBtn = `<div class="replay-wrap"><div class="replay-btn" onclick="toggleReplays(event)">▶ Ver repeticiones</div><div class="replay-menu" id="replay-menu">${reps.map(r => `<a href="${esc(r.u)}" target="_blank" rel="noopener">▶ Combate ${r.i}</a>`).join('')}</div></div>`;
+    const replayBtn = replayButton(e);
 
     // Tarjetas de combate
     const showCombats = twoZero ? e.combats.filter(c => c.winner) : e.combats;
@@ -611,7 +650,7 @@
           <div style="font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: #F5B700; font-weight: 600;">${label}</div>
           <div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; font-weight: 700; margin-top: 4px;">${title}</div>
         </div>
-        ${replayBtn}
+        <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">${enfToggle(e)}${replayBtn}</div>
       </div>
       ${e.hasData ? `<div style="display: flex; ${twoZero ? 'justify-content: space-evenly;' : 'gap: 10px;'}">${cards}</div>` : ''}
       ${body}
@@ -673,7 +712,6 @@
         <div style="flex: 1; font-size: 10px; color: #9296AD; line-height: 1.6; text-align: left; padding-left: 28px;">${m.moves.map(x => '· ' + esc(x)).join('<br>')}</div>
         <div style="flex: 0 0 46px; text-align: right;">
           <div style="font-size: 12px; font-weight: 700; color: #F5B700;">${m.kills} <span style="font-size: 8px; color: #9296AD; font-weight: 500;">kills</span></div>
-          <div style="font-size: 9px; color: #9296AD;">${m.assists} asist.</div>
         </div>
       </div>
     </div>`;
