@@ -483,7 +483,7 @@
   window.setJor = j => { state.jor = j; state.enf = null; state.combat = null; state.sideExpanded = false; render(); };
   window.expandSide = () => { state.sideExpanded = true; render(); };
   window.setEnf = id => { state.enf = id; state.combat = null; render(); };
-  window.setCombat = n => { state.combat = state.combat === n ? null : n; render(); };
+  window.setCombat = n => { state.combat = n; render(); };
   /* ---------- Repeticiones de Showdown (1 por combate) ----------
      En el sheet (Jornadas → Replay combate N) se pone el NOMBRE del archivo .html descargado de Showdown,
      guardado en la carpeta replays/ del repo; o un enlace completo https://... */
@@ -595,12 +595,11 @@
     } else {
       title = `${esc(sideName(e.local))} vs ${esc(sideName(e.visit))} <span style="font-size: 14px; font-weight: 600; color: #9296AD;">· pendiente</span>`;
     }
-    if (state.combat && state.combat === 0) state.combat = null;
-    if (state.combat) {
-      const selectedCombat = e.combats[state.combat - 1];
-      if (!selectedCombat.hasData) state.combat = null;
+    // Al entrar en un enfrentamiento se muestra siempre el Combate 1 (o el primero con datos), con su botón marcado
+    if (!state.combat || !e.combats[state.combat - 1] || !e.combats[state.combat - 1].hasData) {
+      const first = e.combats.find(c => c.hasData);
+      state.combat = first ? first.n : null;
     }
-    if (state.combat) title += ` <span style="font-size: 14px; font-weight: 600; color: #9296AD;">— así estaba el equipo en el Combate ${state.combat}</span>`;
 
     const replayBtn = replayButton(e);
 
@@ -624,7 +623,7 @@
       </div>`;
     }).join('');
 
-    // Qué combate se enseña en el roster: el elegido o, si está jugado, el decisivo (el último)
+    // El roster es siempre el del combate marcado (por defecto el Combate 1)
     let rosterCombat = null;
     if (state.combat) rosterCombat = e.combats[state.combat - 1];
     else if (done) rosterCombat = played[played.length - 1];
