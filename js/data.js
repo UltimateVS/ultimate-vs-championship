@@ -174,7 +174,7 @@
 
     // Clasificación
     DB.stand = {};
-    for (const sig of DB.teamOrder) DB.stand[sig] = { sig, pts: 0, byJ: {}, made: 0, recv: 0, won: 0, lost: 0, played: 0 };
+    for (const sig of DB.teamOrder) DB.stand[sig] = { sig, pts: 0, byJ: {}, made: 0, recv: 0, won: 0, lost: 0, played: 0, ewon: 0, elost: 0 };
     for (const e of DB.enfs) {
       for (const [lado, teams] of [['Local', e.local], ['Visitante', e.visit]]) {
         const op = lado === 'Local' ? 'Visitante' : 'Local';
@@ -183,6 +183,7 @@
           const bj = s.byJ[e.j] || (s.byJ[e.j] = { pts: 0, made: 0, recv: 0, has: false });
           s.made += e.kos[lado]; s.recv += e.kos[op]; bj.made += e.kos[lado]; bj.recv += e.kos[op];
           s.won += e.w[lado]; s.lost += e.w[op];
+          if (e.state === 'jugado') { if (e.winner === lado) s.ewon++; else s.elost++; }
           if (e.hasData) { bj.has = true; s.played++; }
           if (e.pts[lado] !== null) { s.pts += e.pts[lado]; bj.pts += e.pts[lado]; }
         }
@@ -195,7 +196,9 @@
     const PRIZE = { 'MVP': 'mvp', 'Máximo asistente': 'asist', 'DPOY': 'dpoy', '6th Pokémon': 'sexto', 'ALL-GBA 1st Team': 'first', 'ALL-GBA 2nd Team': 'second' };
     DB.awards = [];
     for (const r of raw.Insignias) {
-      const type = PRIZE[S(r[1])]; const j = N(r[0]);
+      // Jornada 1-4, o "Total" (premios del reto elegidos a mano; si Google anula el texto llega vacío)
+      const type = PRIZE[S(r[1])]; const a = S(r[0]);
+      const j = (!a || /^total$/i.test(a)) ? 'T' : N(a);
       if (!type || !j || !S(r[4])) continue;
       DB.awards.push({ j, type, n: N(r[2]), team: S(r[3]), poke: S(r[4]), nick: S(r[5]) });
     }

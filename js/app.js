@@ -277,7 +277,7 @@
       </div>
       <div style="width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;">
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase;">Balance</div>
-        ${bal('Combates ganados', s.won)}${bal('Combates perdidos', s.lost)}${bal('KOs a favor', s.made)}${bal('KOs en contra', s.recv)}
+        ${bal('Enfrentamientos ganados', s.ewon)}${bal('Enfrentamientos perdidos', s.elost)}${bal('Combates ganados', s.won)}${bal('Combates perdidos', s.lost)}${bal('KOs a favor', s.made)}${bal('KOs en contra', s.recv)}
       </div>
     </div>`;
   }
@@ -291,7 +291,7 @@
     }).join('');
   }
   function medallas(sig) {
-    const aw = DB.awards.filter(a => a.team === sig);
+    const aw = DB.awards.filter(a => a.team === sig && a.j !== 'T');
     const byType = arr => ORDER_T.map(type => ({ type, count: arr.filter(a => a.type === type).length })).filter(x => x.count);
     const titled = (list, j) => list.map(m => ({ ...m, title: m.type === 'first' || m.type === 'second' ? `${m.count} pokémon en el ${BADGE[m.type].name}${j ? ' de la Jornada ' + j : ''}` : (m.count > 1 ? `${BADGE[m.type].name} × ${m.count}` : `${BADGE[m.type].name}${j ? ' de la Jornada ' + j : ''}`) }));
     const rows = [1, 2, 3, 4].map(j => {
@@ -722,20 +722,20 @@
   function renderInsignias() {
     const sel = state.ins;
     const hasJ = j => DB.awards.some(a => a.j === j);
-    const hasAny = DB.awards.length > 0;
+    const hasAny = hasJ('T');
     const pill = (key, lab, has) => {
       const on = key === sel;
       const cls = on ? (has ? 'pill sel' : 'pill sel-empty') : (has ? 'pill' : 'pill muted');
       return `<div class="${cls}" onclick="setIns('${key}')">${lab}</div>`;
     };
     const pills = pill('Total', 'Total', hasAny) + [1, 2, 3, 4].map(j => pill(String(j), `Jornada ${j}`, hasJ(j))).join('');
-    const isTotal = sel === 'Total'; const j = isTotal ? null : +sel;
+    const isTotal = sel === 'Total'; const j = isTotal ? 'T' : +sel;
     const sub = isTotal ? 'El escudo en la esquina de cada pokémon indica su equipo — sin necesidad de texto' : 'Vista filtrada por jornada — mismas categorías, solo los datos de esa jornada';
     const has = isTotal ? hasAny : hasJ(j);
     let content;
     if (!has) {
-      const jor = j ? DB.jornadas[j - 1] : null;
-      const msg = isTotal ? 'Los premios aparecerán aquí en cuanto se complete la primera jornada'
+      const jor = isTotal ? null : DB.jornadas[j - 1];
+      const msg = isTotal ? 'Los premios del total los elegís vosotros: aparecerán aquí en cuanto se rellene el bloque TOTAL de la pestaña Insignias del sheet'
         : (jor && jor.done ? `La Jornada ${j} ya está completa · los premios se publicarán en cuanto se apunten en el sheet`
           : `A diferencia de Jornadas (que se actualiza combate a combate), esta vista solo se rellena cuando la Jornada ${j} se completa entera · quedan enfrentamientos de esta jornada por jugar`);
       content = `<div style="padding: 22px 64px 40px;"><div style="min-height: 520px; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center;">
@@ -753,6 +753,7 @@
 
   const monKey = m => `${m.team}|${m.poke}|${m.nick}`;
   function killRanking(j) {
+    if (j === 'T') j = null;
     const map = {};
     for (const e of DB.enfs) {
       if (j && e.j !== j) continue;
@@ -766,7 +767,7 @@
   }
   const jList = js => { const u = [...new Set(js)].sort((a, b) => a - b); return u.length === 1 ? `Jornada ${u[0]}` : `Jornada ${u.slice(0, -1).join(', ')} y ${u[u.length - 1]}`; };
   function groupAwards(type, j) {
-    const list = DB.awards.filter(a => a.type === type && (!j || a.j === j)).sort((a, b) => a.j - b.j || a.n - b.n);
+    const list = DB.awards.filter(a => a.type === type && a.j === j).sort((a, b) => a.n - b.n);
     const map = {}; const out = [];
     for (const a of list) { const k = monKey(a); if (!map[k]) { map[k] = { ...a, js: [] }; out.push(map[k]); } map[k].js.push(a.j); }
     return out;
@@ -796,8 +797,7 @@
           </div>
           <div style="min-width: 0;">
             <div style="font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${esc(pretty(w.poke))}">${esc(monName(w))}</div>
-            ${j ? `<div style="font-size: 10px; color: #9296AD; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(T(w.team).coach)} · ${esc(T(w.team).name)}</div>`
-              : `<div style="display: inline-block; margin-top: 3px; padding: 2px 7px; border-radius: 8px; background: rgba(245,183,0,0.12); color: #F5B700; font-size: 9px; font-weight: 700; letter-spacing: 0.3px;">${jList(w.js).toUpperCase()}</div>`}
+            <div style="font-size: 10px; color: #9296AD; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(T(w.team).coach)} · ${esc(T(w.team).name)}</div>
           </div>
         </div>`).join('') : `<div style="background: #232640; border-radius: 10px; padding: 10px; font-size: 12px; color: #4A4E63; min-height: 84px; display: flex; align-items: center; justify-content: center;">Sin asignar</div>`;
       return `<div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px;">
@@ -815,14 +815,13 @@
             ${logo(w.team, 22, 'position: absolute; bottom: -4px; right: -4px; border: 2px solid #232640;')}
           </div>
           <div style="font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;" title="${esc(pretty(w.poke))}">${esc(monName(w))}</div>
-          ${j ? '' : `<div style="font-size: 8px; color: #9296AD;">${jList(w.js)}</div>`}
         </div>`).join('')}</div>`;
     };
-    const scope = j ? `de la Jornada ${j}` : 'del reto';
+    const scope = j !== 'T' ? `de la Jornada ${j}` : 'del reto';
     return `
     <div style="padding: 22px 64px 40px; display: flex; gap: 24px; align-items: flex-start;">
       <div style="width: 330px; flex-shrink: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px;">
-        <div><div style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700;">Ranking de kills</div><div style="font-size: 11px; color: #9296AD; margin-top: 2px;">${j ? `Solo Jornada ${j}` : 'Acumulado de todas las jornadas jugadas'}</div></div>
+        <div><div style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700;">Ranking de kills</div><div style="font-size: 11px; color: #9296AD; margin-top: 2px;">${j !== 'T' ? `Solo Jornada ${j}` : 'Acumulado de todas las jornadas jugadas'}</div></div>
         ${rankRows}
       </div>
       <div style="flex: 1; display: flex; flex-direction: column; gap: 18px; min-width: 0;">
