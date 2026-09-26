@@ -43,7 +43,7 @@
   }
 
   /* ---------------- navegación (hash) ---------------- */
-  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true };
+  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true };
 
   function route() {
     const [tab, arg] = (location.hash.replace('#', '') || 'inicio').split('/');
@@ -446,9 +446,22 @@
     } else panel = enfPanel(DB.enfById[state.enf]);
     return `
     <div class="pagehead"><h1>Jornadas</h1><div class="pagesub">Las 4 grandes jornadas del reto, enfrentamiento a enfrentamiento</div></div>
-    <div class="pillrow">${pills}</div>
+    <div class="pillrow" style="align-items: center;">${pills}<div style="margin-left: auto;">${spoilerToggle()}</div></div>
     <div style="padding: 22px 64px 40px; display: flex; gap: 28px; align-items: flex-start;">${side}${panel}</div>`;
   }
+  // Botón antispoiler: activado por defecto en cada visita; oculta marcadores, combates y equipos pero deja navegar
+  function spoilerToggle() {
+    const on = state.spoiler;
+    return `<div onclick="toggleSpoiler()" class="clickable" title="${on ? 'Resultados ocultos · toca para verlos' : 'Resultados visibles · toca para ocultarlos'}" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px 7px 16px; border-radius: 20px; background: ${on ? 'rgba(245,183,0,0.12)' : '#1B1D2B'}; border: 1px solid ${on ? '#F5B700' : 'rgba(255,255,255,0.08)'}; user-select: none;">
+      <span style="font-size: 13px;">${on ? '🙈' : '👀'}</span>
+      <span style="font-size: 13px; font-weight: 700; color: ${on ? '#F5B700' : '#9296AD'};">Antispoiler</span>
+      <span style="font-size: 11px; font-weight: 600; color: ${on ? '#F5B700' : '#4A4E63'}; width: 22px;">${on ? 'ON' : 'OFF'}</span>
+      <span style="position: relative; width: 36px; height: 20px; border-radius: 10px; background: ${on ? '#F5B700' : '#4A4E63'}; flex-shrink: 0;">
+        <span style="position: absolute; top: 2px; ${on ? 'right: 2px;' : 'left: 2px;'} width: 16px; height: 16px; border-radius: 50%; background: ${on ? '#12131C' : '#F4F1EA'};"></span>
+      </span>
+    </div>`;
+  }
+  window.toggleSpoiler = () => { state.spoiler = !state.spoiler; state.combat = null; render(); };
   window.setJor = j => { state.jor = j; state.enf = null; state.combat = null; state.sideExpanded = false; render(); };
   window.expandSide = () => { state.sideExpanded = true; render(); };
   window.setEnf = id => { state.enf = id; state.combat = null; render(); };
@@ -458,19 +471,25 @@
 
   function sideCard(e, J) {
     const sel = e.id === state.enf && J.hasData;
-    const score = e.hasData ? `<div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px;">${e.w.Local}–${e.w.Visitante}</div>` : `<div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px; color: #9296AD;">vs</div>`;
+    const score = e.hasData && !state.spoiler ? `<div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px;">${e.w.Local}–${e.w.Visitante}</div>` : `<div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px; color: #9296AD;">vs</div>`;
+    // Siglas del equipo grandes y en negrita; nombre del entrenador más pequeño y apagado
+    const SIG = x => `<span style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: #F4F1EA; letter-spacing: 0.3px;">${esc(x)}</span>`;
+    const AMP = '<span style="font-size: 12px; color: #9296AD; font-weight: 500;">&amp;</span>';
+    const COACH = x => `<span style="font-size: 13px; font-weight: 500; color: #9296AD;">${esc(T(x).coach)}</span>`;
+    const DOT = '<span style="font-size: 13px; color: #4A4E63;">·</span>';
+    const row = inner => `<div style="display: flex; align-items: center; gap: 6px; white-space: nowrap;">${inner}</div>`;
     let left, right;
     if (e.duo) {
-      left = `<div style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;">${logo(e.local[0], 20, 'margin-right: -4px;')}${logo(e.local[1], 20)}${esc(coaches(e.local))}</div>`;
-      right = `<div style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;">${esc(coaches(e.visit))}${logo(e.visit[0], 20, 'margin-left: 2px;')}${logo(e.visit[1], 20, 'margin-left: -4px;')}</div>`;
+      left = row(`${logo(e.local[0], 20, 'margin-right: -4px;')}${logo(e.local[1], 20)}${SIG(e.local[0])}${AMP}${SIG(e.local[1])}`);
+      right = row(`${SIG(e.visit[0])}${AMP}${SIG(e.visit[1])}${logo(e.visit[0], 20, 'margin-left: 2px;')}${logo(e.visit[1], 20, 'margin-left: -4px;')}`);
     } else {
-      const lab = s => J.j === 1 ? esc(T(s).coach) : `${esc(T(s).coach)} · ${esc(T(s).short)}`;
-      left = `<div style="display: flex; align-items: center; gap: ${J.j === 1 ? 6 : 8}px; font-size: 13px; font-weight: 600; white-space: nowrap;">${logo(e.local[0], 20)}${lab(e.local[0])}</div>`;
-      right = `<div style="display: flex; align-items: center; gap: ${J.j === 1 ? 6 : 8}px; font-size: 13px; font-weight: 600; white-space: nowrap;">${lab(e.visit[0])}${logo(e.visit[0], 20)}</div>`;
+      left = row(`${logo(e.local[0], 20)}${SIG(e.local[0])}${DOT}${COACH(e.local[0])}`);
+      right = row(`${SIG(e.visit[0])}${DOT}${COACH(e.visit[0])}${logo(e.visit[0], 20)}`);
     }
     let st = 'pendiente', stColor = '#9296AD';
     if (e.state === 'jugado') st = e.replays.some(Boolean) ? 'replay disponible' : 'jugado';
     else if (e.state === 'curso' || e.hasData) { st = `en curso (${e.combats.filter(c => c.winner).length}/3 combates)`; stColor = '#F5B700'; }
+    if (state.spoiler) { st = '🔒 oculto'; stColor = '#9296AD'; }
     const dim = J.hasData ? '' : ' opacity: 0.55;';
     return `<div onclick="${J.hasData ? `setEnf('${e.id}')` : ''}" class="${J.hasData ? 'clickable' : ''}" style="background: #1B1D2B; border: 1px solid ${sel ? '#F5B700' : 'rgba(255,255,255,0.08)'}; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px;${dim}">
       <div style="display: flex; justify-content: space-between; align-items: center;">${left}${score}${right}</div>
@@ -478,7 +497,39 @@
     </div>`;
   }
 
+  function lockedPanel(e) {
+    const kind = e.duo ? '2vs2 compartiendo equipo' : '1vs1';
+    const label = `Enfrentamiento ${e.n} · ${e.j === 1 ? 'Singles Gen7' : 'VGC Dobles'} · Bo3 · ${kind}`;
+    const cards = [1, 2, 3].map(n => `<div style="flex: 1; background: #1B1D2B; border: 1px dashed rgba(255,255,255,0.15); border-radius: 10px; padding: 10px 14px; text-align: center;">
+        <div style="font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #9296AD;">Combate ${n}</div>
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #4A4E63;">🔒 oculto</div>
+      </div>`).join('');
+    const reps = e.replays.map((u, i) => u ? { u, i: i + 1 } : null).filter(Boolean);
+    let replayBtn = '';
+    if (reps.length === 1) replayBtn = `<a class="replay-btn" href="${esc(reps[0].u)}" target="_blank" rel="noopener">▶ Ver repeticiones</a>`;
+    else if (reps.length > 1) replayBtn = `<div class="replay-wrap"><div class="replay-btn" onclick="toggleReplays(event)">▶ Ver repeticiones</div><div class="replay-menu" id="replay-menu">${reps.map(r => `<a href="${esc(r.u)}" target="_blank" rel="noopener">▶ Combate ${r.i}</a>`).join('')}</div></div>`;
+    return `<div style="flex: 1; min-width: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+        <div>
+          <div style="font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: #F5B700; font-weight: 600;">${label}</div>
+          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; font-weight: 700; margin-top: 4px;">${esc(coaches(e.local))} vs ${esc(coaches(e.visit))}</div>
+        </div>
+        ${replayBtn}
+      </div>
+      <div style="display: flex; gap: 10px;">${cards}</div>
+      <div style="flex: 1; display: flex; align-items: center; justify-content: center; min-height: 420px;">
+        <div style="text-align: center; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+          <div style="font-size: 34px;">🙈</div>
+          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 700; color: #F4F1EA;">Antispoiler activado</div>
+          <div style="font-size: 13px; color: #9296AD; line-height: 1.5;">Marcadores, combates y equipos están ocultos para que nadie se entere antes de tiempo. Puedes moverte entre jornadas y enfrentamientos con total tranquilidad.</div>
+          <div onclick="toggleSpoiler()" class="clickable" style="margin-top: 6px; padding: 9px 18px; border-radius: 20px; background: #F5B700; color: #12131C; font-size: 13px; font-weight: 700;">Desactivar antispoiler y ver resultados</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function enfPanel(e) {
+    if (state.spoiler) return lockedPanel(e);
     const sideName = (sigs) => coaches(sigs);
     const played = e.combats.filter(c => c.winner);
     const done = e.state === 'jugado';
