@@ -43,7 +43,7 @@
   }
 
   /* ---------------- navegación (hash) ---------------- */
-  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true };
+  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false };
 
   function route() {
     const [tab, arg] = (location.hash.replace('#', '') || 'inicio').split('/');
@@ -140,10 +140,14 @@
         <div style="font-size: 12px; color: #9296AD; letter-spacing: 1px; text-transform: uppercase;">Jornada ${le.j} · ${jLabel(le.j)}${le.date ? ' · ' + fmtDay(le.date) : ''}</div>
         <div style="display: flex; align-items: center; justify-content: center; gap: 16px; padding: 12px 0;">
           ${side(le.local)}
-          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 700;">${le.w.Local}–${le.w.Visitante}</div>
+          ${state.lastReveal
+            ? `<div style="font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 700;">${le.w.Local}–${le.w.Visitante}</div>`
+            : `<div title="Resultado oculto" style="font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 700; color: #4A4E63;">?–?</div>`}
           ${side(le.visit)}
         </div>
-        <div style="font-size: 13px; color: #9296AD;">${le.kos.Local}–${le.kos.Visitante} KOs${rep}</div>
+        ${state.lastReveal
+          ? `<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;"><div style="font-size: 13px; color: #9296AD;">${le.kos.Local}–${le.kos.Visitante} KOs${rep}</div><a onclick="toggleLast()" style="font-size: 12px; font-weight: 600; color: #9296AD;">🙈 Ocultar</a></div>`
+          : `<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;"><div style="font-size: 13px; color: #9296AD;">🔒 Resultado oculto</div><div onclick="toggleLast()" class="clickable" style="padding: 7px 14px; border-radius: 20px; background: rgba(245,183,0,0.12); border: 1px solid #F5B700; color: #F5B700; font-size: 12px; font-weight: 700; white-space: nowrap;">👀 Ver resultado</div></div>`}
         <a onclick="go('jornadas/${le.id}')" style="font-size: 13px; font-weight: 600;">Ver detalle →</a>`;
     } else {
       last = `<div style="flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 13px; color: #9296AD;">Aún no hay ningún enfrentamiento terminado</div>`;
@@ -180,6 +184,7 @@
       </div>
     </div>`;
   }
+  window.toggleLast = () => { state.lastReveal = !state.lastReveal; render(); };
   function calStatus(e) {
     if (e.state === 'jugado') return { txt: '✓ ' + (e.date ? fmtDate(e.date, e.hasTime) : 'Jugado'), color: '#9296AD', w: 600 };
     if (e.state === 'curso') return { txt: 'En curso', color: '#F5B700', w: 600 };
