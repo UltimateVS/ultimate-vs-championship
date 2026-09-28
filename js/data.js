@@ -168,7 +168,9 @@
 
     // Jornadas con datos
     DB.jornadas = [1, 2, 3, 4].map(j => {
-      const list = DB.enfs.filter(e => e.j === j);
+      // Orden por fecha (de antes a después). Sin fecha van al final: primero los ya jugados, luego los pendientes; empate → nº del calendario
+      const rank = e => e.date ? 0 : (e.state === 'jugado' ? 1 : 2);
+      const list = DB.enfs.filter(e => e.j === j).sort((x, y) => (rank(x) - rank(y)) || ((x.date && y.date) ? x.date - y.date : 0) || (x.n - y.n));
       return { j, enfs: list, hasData: list.some(e => e.hasData), hasDate: list.some(e => e.date), done: list.length > 0 && list.every(e => e.state === 'jugado') };
     });
 

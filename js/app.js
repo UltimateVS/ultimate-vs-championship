@@ -53,7 +53,7 @@
       const e = DB.enfById[arg];
       if (state.enf !== arg) state.combat = null;
       state.jor = e.j; state.enf = arg;
-      if (e.n > 2) state.sideExpanded = true;
+      if (DB.jornadas[e.j - 1].enfs.indexOf(e) >= 2) state.sideExpanded = true;
     }
     render();
     window.scrollTo(0, 0);
@@ -425,7 +425,7 @@
       const withData = J.enfs.filter(e => e.hasData);
       state.enf = (withData.length ? withData[withData.length - 1] : J.enfs[0]).id;
       state.combat = null;
-      state.sideExpanded = DB.enfById[state.enf].n > 2;
+      state.sideExpanded = J.enfs.indexOf(DB.enfById[state.enf]) >= 2;
     }
     const pills = DB.jornadas.map(x => {
       const sel = x.j === J.j;
@@ -435,7 +435,7 @@
     const headline = J.j === 1 ? `${J.enfs.length} enfrentamientos individuales · todos contra todos` : `${J.enfs.length} enfrentamientos · 1 enfrentamiento 2vs2 + ${J.enfs.length - 1} individuales`;
     const visible = state.sideExpanded ? J.enfs : J.enfs.slice(0, 2);
     const rest = J.enfs.length - visible.length;
-    const restLabel = J.j === 1 || J.enfs.slice(2).every(e => !e.duo) ? `+ ${rest} enfrentamientos individuales más de esta jornada` : `+ ${rest} enfrentamientos más de esta jornada`;
+    const restLabel = J.j === 1 || J.enfs.slice(visible.length).every(e => !e.duo) ? `+ ${rest} enfrentamientos individuales más de esta jornada` : `+ ${rest} enfrentamientos más de esta jornada`;
     const side = `
       <div style="width: 430px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;">
         <div style="font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: #9296AD; font-weight: 600; margin-bottom: 2px;">${headline}</div>
@@ -546,9 +546,13 @@
     </div>`;
   }
 
+  const DOW = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  function enfDateLine(e) {
+    const txt = e.date ? `${DOW[e.date.getDay()]} ${fmtDate(e.date, e.hasTime)}` : 'Fecha por confirmar';
+    return `<div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; font-weight: 700; color: ${e.date ? '#D8D9E3' : '#4A4E63'}; margin-top: 4px;">📅 ${txt}</div>`;
+  }
   function lockedPanel(e) {
-    const kind = e.duo ? '2vs2 compartiendo equipo' : '1vs1';
-    const label = `Enfrentamiento ${e.n} · ${e.j === 1 ? 'Singles Gen7' : 'VGC Dobles'} · Bo3 · ${kind}`;
+    const label = `Enfrentamiento ${e.n} · Bo3 · ${e.duo ? '2vs2' : '1vs1'}`;
     const cards = [1, 2, 3].map(n => `<div style="flex: 1; background: #1B1D2B; border: 1px dashed rgba(255,255,255,0.15); border-radius: 10px; padding: 10px 14px; text-align: center;">
         <div style="font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #9296AD;">Combate ${n}</div>
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #4A4E63;">🔒 oculto</div>
@@ -557,7 +561,8 @@
     return `<div style="flex: 1; min-width: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 16px;">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
         <div>
-          <div style="font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: #F5B700; font-weight: 600;">${label}</div>
+          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; letter-spacing: 0.5px; text-transform: uppercase; color: #F5B700; font-weight: 700;">${label}</div>
+          ${enfDateLine(e)}
           <div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; font-weight: 700; margin-top: 4px;">${esc(e.local.join(' & '))} vs ${esc(e.visit.join(' & '))}</div>
         </div>
         <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">${enfToggle(e)}${replayBtn}</div>
@@ -581,9 +586,7 @@
     const played = e.combats.filter(c => c.winner);
     const done = e.state === 'jugado';
     const twoZero = done && played.length === 2;
-    const fmt = e.j === 1 ? 'Singles Gen7' : 'VGC Dobles';
-    const kind = e.duo ? '2vs2 compartiendo equipo' : '1vs1';
-    const label = `Enfrentamiento ${e.n} · ${fmt} · ${twoZero ? 'Bo3 (resuelto en 2 partidas)' : `Bo3 · ${kind}`}`;
+    const label = `Enfrentamiento ${e.n} · Bo3 · ${e.duo ? '2vs2' : '1vs1'}`;
     let title;
     const plural = sigs => sigs.length > 1 ? 'ganan' : 'gana';
     if (done) {
@@ -646,7 +649,8 @@
     return `<div style="flex: 1; min-width: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 16px;">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
         <div>
-          <div style="font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: #F5B700; font-weight: 600;">${label}</div>
+          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; letter-spacing: 0.5px; text-transform: uppercase; color: #F5B700; font-weight: 700;">${label}</div>
+          ${enfDateLine(e)}
           <div style="font-family: 'Space Grotesk', sans-serif; font-size: 21px; font-weight: 700; margin-top: 4px;">${title}</div>
         </div>
         <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">${enfToggle(e)}${replayBtn}</div>
