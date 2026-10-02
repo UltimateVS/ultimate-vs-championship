@@ -43,7 +43,7 @@
   }
 
   /* ---------------- navegación (hash) ---------------- */
-  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set() };
+  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set() };
 
   function route() {
     const [tab, arg] = (location.hash.replace('#', '') || 'inicio').split('/');
@@ -732,7 +732,7 @@
       const cls = on ? (has ? 'pill sel' : 'pill sel-empty') : (has ? 'pill' : 'pill muted');
       return `<div class="${cls}" onclick="setIns('${key}')">${lab}</div>`;
     };
-    const pills = pill('Total', 'Total', hasAny) + [1, 2, 3, 4].map(j => pill(String(j), `Jornada ${j}`, hasJ(j))).join('');
+    const pills = [1, 2, 3, 4].map(j => pill(String(j), `Jornada ${j}`, hasJ(j))).join('') + pill('Total', 'Total', hasAny);
     const isTotal = sel === 'Total'; const j = isTotal ? 'T' : +sel;
     const sub = isTotal ? 'El escudo en la esquina de cada pokémon indica su equipo — sin necesidad de texto' : 'Vista filtrada por jornada — mismas categorías, solo los datos de esa jornada';
     const has = isTotal ? hasAny : hasJ(j);
@@ -753,10 +753,12 @@
     ${content}`;
   }
   window.setIns = k => { state.ins = k; render(); };
+  window.setKillMode = m => { state.killMode = m; render(); };
   window.toggleSecond = () => { state.secondOpen = !state.secondOpen; render(); };
 
   const monKey = m => `${m.team}|${m.poke}|${m.nick}`;
-  function killRanking(j) {
+  // mode 'tot' = kills totales · 'avg' = kills por combate (kills ÷ combates en los que ha participado como titular)
+  function killRanking(j, mode) {
     if (j === 'T') j = null;
     const map = {};
     for (const e of DB.enfs) {
@@ -764,10 +766,14 @@
       for (const cb of e.combats) for (const lado of ['Local', 'Visitante']) for (const m of cb.sides[lado].tit) {
         if (!m.poke) continue;
         const k = monKey(m);
-        (map[k] || (map[k] = { team: m.team, poke: m.poke, nick: m.nick, kills: 0 })).kills += m.kills;
+        const r = map[k] || (map[k] = { team: m.team, poke: m.poke, nick: m.nick, kills: 0, combats: 0 });
+        r.kills += m.kills; r.combats++;
       }
     }
-    return Object.values(map).filter(x => x.kills > 0).sort((a, b) => b.kills - a.kills).slice(0, 5);
+    const list = Object.values(map).filter(x => x.kills > 0);
+    list.forEach(x => { x.avg = x.kills / x.combats; });
+    list.sort(mode === 'avg' ? (a, b) => b.avg - a.avg || b.kills - a.kills : (a, b) => b.kills - a.kills || a.combats - b.combats);
+    return list.slice(0, 5);
   }
   const jList = js => { const u = [...new Set(js)].sort((a, b) => a - b); return u.length === 1 ? `Jornada ${u[0]}` : `Jornada ${u.slice(0, -1).join(', ')} y ${u[u.length - 1]}`; };
   function groupAwards(type, j) {
@@ -777,7 +783,12 @@
     return out;
   }
   function insigniasContent(j) {
-    const rank = killRanking(j);
+    const avgMode = state.killMode === 'avg';
+    const rank = killRanking(j, state.killMode);
+    const nCombats = n => `${n} ${n === 1 ? 'combate' : 'combates'}`;
+    const seg = (m, lab) => `<div onclick="setKillMode('${m}')" style="flex: 1; text-align: center; padding: 7px 8px; border-radius: 8px; font-size: 12px; cursor: pointer; ${state.killMode === m ? 'font-weight: 700; background: #F5B700; color: #12131C;' : 'font-weight: 600; color: #9296AD;'}">${lab}</div>`;
+    const killSelector = `<div style="display: flex; gap: 4px; background: #232640; border-radius: 10px; padding: 3px;">${seg('tot', 'Kills totales')}${seg('avg', 'Kills por combate')}</div>`;
+    const rankSub = avgMode ? `Kills ÷ combates en los que ha participado · ${j !== 'T' ? `solo Jornada ${j}` : 'todas las jornadas'}` : (j !== 'T' ? `Solo Jornada ${j}` : 'Acumulado de todas las jornadas jugadas');
     const rankRows = rank.map((r, i) => `
       <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
         <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
@@ -786,9 +797,12 @@
             <img src="${sprite(r.poke)}" ${onErr} style="width: 64px; height: 64px; object-fit: contain;">
             ${logo(r.team, 22, 'position: absolute; bottom: -3px; right: -3px; border: 2px solid #1B1D2B;')}
           </div>
-          <div style="font-size: 13px; font-weight: 600;">${esc(monName(r))}</div>
+          <div style="min-width: 0;">
+            <div style="font-size: 13px; font-weight: 600;">${esc(monName(r))}</div>
+            <div style="font-size: 10px; color: #9296AD; margin-top: 2px;">${avgMode ? `${r.kills} kills · ${nCombats(r.combats)}` : nCombats(r.combats)}</div>
+          </div>
         </div>
-        <div style="font-size: 14px; font-weight: 700;${i === 0 ? ' color: #F5B700;' : ''}">${r.kills}</div>
+        <div style="font-size: 14px; font-weight: 700;${i === 0 ? ' color: #F5B700;' : ''}">${avgMode ? r.avg.toFixed(2).replace('.', ',') : r.kills}</div>
       </div>`).join('') || `<div style="font-size: 12px; color: #4A4E63;">Todavía no hay kills apuntadas</div>`;
 
     const prizeCard = type => {
@@ -825,7 +839,8 @@
     return `
     <div style="padding: 22px 64px 40px; display: flex; gap: 24px; align-items: flex-start;">
       <div style="width: 330px; flex-shrink: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px;">
-        <div><div style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700;">Ranking de kills</div><div style="font-size: 11px; color: #9296AD; margin-top: 2px;">${j !== 'T' ? `Solo Jornada ${j}` : 'Acumulado de todas las jornadas jugadas'}</div></div>
+        <div><div style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700;">Ranking de kills</div><div style="font-size: 11px; color: #9296AD; margin-top: 2px;">${rankSub}</div></div>
+        ${killSelector}
         ${rankRows}
       </div>
       <div style="flex: 1; display: flex; flex-direction: column; gap: 18px; min-width: 0;">
