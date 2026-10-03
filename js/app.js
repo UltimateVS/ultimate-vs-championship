@@ -56,6 +56,7 @@
       if (DB.jornadas[e.j - 1].enfs.indexOf(e) >= 2) state.sideExpanded = true;
     }
     state.voteView = null; state.voteAsk = null; state.voteDone = '';   // la votación se cierra al cambiar de pestaña
+    if (state.tab === 'insignias') state.ins = defaultIns();
     render();
     window.scrollTo(0, 0);
   }
@@ -724,6 +725,14 @@
   /* =====================================================================
      5 · INSIGNIAS
      ===================================================================== */
+  // Jornada que se abre al entrar en Insignias: Total solo si ya tiene premios; si no, la jornada más avanzada
+  // con información (premios apuntados, o terminada y por tanto con ranking y votación); si no hay ninguna, la 1
+  function defaultIns() {
+    const hasJ = j => DB.awards.some(a => a.j === j);
+    if (hasJ('T')) return 'Total';
+    for (let j = 4; j >= 1; j--) if (hasJ(j) || (DB.jornadas[j - 1] && DB.jornadas[j - 1].done)) return String(j);
+    return '1';
+  }
   function renderInsignias() {
     const sel = state.ins;
     const hasJ = j => DB.awards.some(a => a.j === j);
