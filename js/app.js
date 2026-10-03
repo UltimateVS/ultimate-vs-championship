@@ -43,7 +43,7 @@
   }
 
   /* ---------------- navegación (hash) ---------------- */
-  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set() };
+  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '' };
 
   function route() {
     const [tab, arg] = (location.hash.replace('#', '') || 'inicio').split('/');
@@ -55,6 +55,7 @@
       state.jor = e.j; state.enf = arg;
       if (DB.jornadas[e.j - 1].enfs.indexOf(e) >= 2) state.sideExpanded = true;
     }
+    state.voteView = null; state.voteAsk = null; state.voteDone = '';   // la votación se cierra al cambiar de pestaña
     render();
     window.scrollTo(0, 0);
   }
@@ -737,11 +738,17 @@
     const pills = [1, 2, 3, 4].map(j => pill(String(j), `Jornada ${j}`, hasJ(j) || votable(j))).join('') + pill('Total', 'Total', hasAny || votable('T'));
     const isTotal = sel === 'Total'; const j = isTotal ? 'T' : +sel;
     const vote = votable(j);
-    const sub = vote ? `${isTotal ? 'Reto terminado' : 'Jornada terminada'} — todos los pokémon de un vistazo para votar los premios`
+    if (VOTE_URL) voteLoad(false);
+    // Votación: pantalla de votar (jornada terminada, sin premios y sin revelar) o de votos revelados
+    const view = !VOTE_URL || !VOTE.data ? null : (state.voteView === 'votar' && vote && !voteRevealed(j)) ? 'votar' : (state.voteView === 'votos' && voteRevealed(j)) ? 'votos' : null;
+    const scopeTxt = isTotal ? 'del Total' : `de la Jornada ${j}`;
+    const sub = view === 'votar' ? `Votación ${scopeTxt} — elige tu equipo y reparte tus votos` : view === 'votos' ? `Votos ${scopeTxt} — así ha votado cada equipo` : vote ? `${isTotal ? 'Reto terminado' : 'Jornada terminada'} — todos los pokémon de un vistazo para votar los premios`
       : isTotal ? 'El escudo en la esquina de cada pokémon indica su equipo — sin necesidad de texto' : 'Vista filtrada por jornada — mismas categorías, solo los datos de esa jornada';
     const has = isTotal ? hasAny : hasJ(j);
     let content;
-    if (vote) content = insigniasContent(j, true);
+    if (view === 'votar') content = voteScreen(j);
+    else if (view === 'votos') content = voteResults(j);
+    else if (vote) content = insigniasContent(j, true);
     else if (!has) {
       const jor = isTotal ? null : DB.jornadas[j - 1];
       const msg = isTotal ? 'Los premios del total los elegís vosotros: aparecerán aquí en cuanto se rellene el bloque TOTAL de la pestaña Insignias del sheet'
@@ -754,10 +761,10 @@
     } else content = insigniasContent(j);
     return `
     <div class="pagehead tight"><h1>Insignias &amp; estadísticas</h1><div class="pagesub">${sub}</div></div>
-    <div class="pillrow">${pills}</div>
+    <div class="pillrow">${pills}${!view && !vote && VOTE_URL && voteRevealed(j) ? `<div class="clickable" onclick="voteOpen('votos')" style="margin-left: auto; padding: 9px 18px; border-radius: 20px; border: 1px solid rgba(76,201,240,0.5); background: rgba(76,201,240,0.08); color: #4CC9F0; font-size: 13px; font-weight: 700;">🗳️ Ver votos ${isTotal ? 'del total' : 'de la jornada'}</div>` : ''}</div>
     ${content}`;
   }
-  window.setIns = k => { state.ins = k; render(); };
+  window.setIns = k => { state.ins = k; state.voteView = null; state.voteAsk = null; state.voteDone = ''; render(); };
   window.setKillMode = m => { state.killMode = m; render(); };
   window.toggleSecond = () => { state.secondOpen = !state.secondOpen; render(); };
 
@@ -866,12 +873,15 @@
 
     const what = isT ? 'Reto terminado · premios del total' : `Jornada ${j} terminada · premios`;
     return `<div style="flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0;">
-      <div style="background: rgba(245,183,0,0.08); border: 1px solid rgba(245,183,0,0.35); border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; gap: 12px;">
-        <div style="font-size: 20px;">🗳️</div>
-        <div>
-          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700;">${what} pendientes de votación</div>
-          <div style="font-size: 11px; color: #9296AD; margin-top: 2px;">Estos son todos los pokémon que han jugado ${isT ? 'el reto' : 'la jornada'}. Los premios aparecerán aquí cuando se apunten en el sheet.</div>
+      <div style="background: rgba(245,183,0,0.08); border: 1px solid rgba(245,183,0,0.35); border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 20px;">🗳️</div>
+          <div>
+            <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700;">${what} pendientes de votación${state.voteDone ? ` · <span style="color: #4CC9F0;">✓ ${esc(state.voteDone)}</span>` : ''}</div>
+            <div style="font-size: 11px; color: #9296AD; margin-top: 2px;">Estos son todos los pokémon que han jugado ${isT ? 'el reto' : 'la jornada'}. ${VOTE_URL ? (voteRevealed(j) ? 'Los votos ya están revelados.' : 'Los votos se verán cuando voten todos y se marque "Mostrar" en el sheet.') : 'Los premios aparecerán aquí cuando se apunten en el sheet.'}</div>
+          </div>
         </div>
+        ${voteStatusBox(j)}
       </div>
       ${section('Equipos individuales', `En orden de clasificación ${isT ? 'general' : `de la Jornada ${j}`} · kills y combates jugados en enfrentamientos individuales`)}
       ${indRows}
@@ -957,6 +967,316 @@
           </div>
         </div>
       </div>`}
+    </div>`;
+  }
+
+  /* =====================================================================
+     5-bis · VOTACIÓN (premios por jornada y del total)
+     Los votos se guardan en el Google Sheet a través de un Apps Script
+     (CFG.VOTE_URL). Si VOTE_URL está vacío, la web funciona como antes.
+     ===================================================================== */
+  const VOTE_URL = String(CFG.VOTE_URL || '').trim();
+  const VOTE = { data: null, loading: false, error: '', at: 0 };
+  const AWK = ['mvp', 'asist', 'dpoy', 'sexto', 'first', 'second'];
+  const AWN = { mvp: 3, asist: 3, dpoy: 3, sexto: 3, first: 6, second: 6 };
+  const sk = j => j === 'T' ? 'T' : String(j);
+  const vs = j => (VOTE.data && VOTE.data[sk(j)]) || { show: false, voted: {}, votes: null };
+  const voteRevealed = j => !!vs(j).votes;
+  const pickKey = p => `${p.team}|${p.poke}`;
+
+  async function voteLoad(force) {
+    if (!VOTE_URL || VOTE.loading) return;
+    if (!force && Date.now() - VOTE.at < 30000) return;
+    VOTE.loading = true; VOTE.at = Date.now();
+    try {
+      const r = await fetch(VOTE_URL + (VOTE_URL.includes('?') ? '&' : '?') + 't=' + Date.now());
+      const d = await r.json();
+      if (!d || !d.ok) throw new Error((d && d.error) || 'respuesta no válida');
+      VOTE.data = d.scopes || {}; VOTE.error = '';
+    } catch (err) { VOTE.error = 'No se ha podido conectar con la votación'; }
+    VOTE.loading = false;
+    if (state.tab === 'insignias') render();
+  }
+
+  // Orden de los equipos: clasificación de la jornada (o general en el Total)
+  function voteOrder(j) {
+    if (j === 'T') return DB.ranking.map(r => r.sig);
+    const st = sig => DB.stand[sig].byJ[j] || { pts: 0, made: 0, recv: 0 };
+    return [...DB.teamOrder].sort((a, b) => (st(b).pts - st(a).pts) || ((st(b).made - st(b).recv) - (st(a).made - st(a).recv)) || (DB.teamOrder.indexOf(a) - DB.teamOrder.indexOf(b)));
+  }
+  // Candidatos: todos los pokémon de cada equipo en la jornada (individuales + 2vs2), con kills y combates totales
+  function voteCands(j) {
+    const per = {}; const byKey = {};
+    for (const s of DB.teamOrder) per[s] = [];
+    const get = m => { const k = pickKey(m); if (!byKey[k]) { byKey[k] = { key: k, team: m.team, poke: m.poke, nick: '', kills: 0, combats: 0 }; (per[m.team] || (per[m.team] = [])).push(byKey[k]); } if (m.nick && !byKey[k].nick) byKey[k].nick = m.nick; return byKey[k]; };
+    for (const e of DB.enfs) {
+      if (j !== 'T' && e.j !== j) continue;
+      for (const cb of e.combats) for (const lado of ['Local', 'Visitante']) {
+        const sd = cb.sides[lado];
+        for (const m of sd.tit) { if (!m.poke) continue; const r = get(m); r.kills += m.kills; r.combats++; }
+        for (const m of [sd.ban, sd.sub]) if (m && m.poke) get(m);
+      }
+    }
+    return { per, byKey };
+  }
+  const emptyBallot = () => { const b = {}; for (const a of AWK) b[a] = Array(AWN[a]).fill(null); return b; };
+  const lsKey = (j, team) => `reto-voto-${CFG.SHEET_ID || 'local'}-${sk(j)}-${team}`;
+  function ballotLoad(j, team, byKey) {
+    const b = emptyBallot();
+    try {
+      const raw = JSON.parse(localStorage.getItem(lsKey(j, team)) || 'null');
+      if (raw) for (const a of AWK) (raw[a] || []).slice(0, AWN[a]).forEach((k, i) => { if (k && byKey[k] && byKey[k].team !== team) b[a][i] = k; });
+    } catch (err) { /* sin almacenamiento: papeleta vacía */ }
+    return b;
+  }
+  const ballotSave = () => { try { localStorage.setItem(lsKey(state.voteJ, state.voteTeam), JSON.stringify(state.ballot)); } catch (err) { /* nada */ } };
+  const ballotDone = b => AWK.every(a => !b[a].includes(null));
+  const nextOpen = (b, from) => { const i = AWK.indexOf(from); for (let k = 1; k <= AWK.length; k++) { const a = AWK[(i + k) % AWK.length]; if (b[a].includes(null)) return a; } return from; };
+  const fmtVoteTime = ts => { const d = new Date(ts); return isNaN(d) ? '' : fmtDate(d, true); };
+
+  window.voteOpen = view => { state.voteView = view; state.voteTeam = null; state.voteAsk = null; state.voteMsg = ''; render(); window.scrollTo(0, 0); };
+  window.voteClose = () => { state.voteView = null; state.voteAsk = null; render(); window.scrollTo(0, 0); };
+  window.voteAskTeam = sig => { state.voteAsk = sig; render(); };
+  window.voteCancelAsk = () => { state.voteAsk = null; render(); };
+  window.voteConfirmTeam = () => {
+    const j = state.ins === 'Total' ? 'T' : +state.ins;
+    state.voteTeam = state.voteAsk; state.voteAsk = null; state.voteJ = j; state.voteMsg = '';
+    state.ballot = ballotLoad(j, state.voteTeam, voteCands(j).byKey);
+    state.voteActive = state.ballot.mvp.includes(null) ? 'mvp' : nextOpen(state.ballot, 'mvp');
+    render();
+  };
+  window.voteAward = a => { state.voteActive = a; state.voteMsg = ''; render(); };
+  window.voteClear = (a, i) => { state.ballot[a][i] = null; state.voteActive = a; state.voteMsg = ''; ballotSave(); render(); };
+  window.votePick = key => {
+    const b = state.ballot; const a = state.voteActive; const arr = b[a]; state.voteMsg = '';
+    const i = arr.indexOf(key);
+    if (i >= 0) arr[i] = null;
+    else if ((a === 'first' && b.second.includes(key)) || (a === 'second' && b.first.includes(key))) state.voteMsg = `Ese pokémon ya está en tu ${a === 'first' ? 'ALL-GBA 2nd Team' : 'ALL-GBA 1st Team'}: quítalo de ahí primero`;
+    else {
+      const f = arr.indexOf(null);
+      if (f < 0) state.voteMsg = 'Este premio ya está completo: pulsa uno de los elegidos para quitarlo';
+      else { arr[f] = key; if (!arr.includes(null)) state.voteActive = nextOpen(b, a); }
+    }
+    ballotSave(); render();
+  };
+  window.voteSend = async () => {
+    if (state.voteSending || !ballotDone(state.ballot)) return;
+    const j = state.voteJ; const { byKey } = voteCands(j);
+    const out = {}; for (const a of AWK) out[a] = state.ballot[a].map(k => ({ team: byKey[k].team, poke: byKey[k].poke, nick: byKey[k].nick }));
+    state.voteSending = true; state.voteMsg = ''; render();
+    try {
+      const r = await fetch(VOTE_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ scope: sk(j), team: state.voteTeam, ballot: out }) });
+      const d = await r.json();
+      if (!d || !d.ok) throw new Error((d && d.error) || 'El sheet no ha aceptado el voto');
+      state.voteSending = false; state.voteView = null; state.voteDone = `Voto de ${state.voteTeam} enviado`;
+      await voteLoad(true); render(); window.scrollTo(0, 0);
+    } catch (err) {
+      state.voteSending = false; state.voteMsg = `No se ha podido enviar: ${err.message || 'error de conexión'}. Tu papeleta sigue guardada en este dispositivo.`; render();
+    }
+  };
+
+  // Estado de la votación para el aviso de la jornada: escudos (marcado = ya ha votado) + botón
+  function voteStatusBox(j) {
+    if (!VOTE_URL) return '';
+    if (!VOTE.data) return `<div style="font-size: 11px; color: #9296AD; white-space: nowrap;">${VOTE.error ? esc(VOTE.error) : 'Cargando votación…'}</div>`;
+    const s = vs(j); const n = DB.teamOrder.filter(t => s.voted[t]).length;
+    const who = DB.teamOrder.map(t => {
+      const ok = !!s.voted[t];
+      return `<div style="position: relative;" title="${esc(t)}${ok ? ' · votó el ' + esc(fmtVoteTime(s.voted[t])) : ' · pendiente'}">${logo(t, 28, `border: 2px solid ${ok ? '#4CC9F0' : 'rgba(255,255,255,0.15)'};${ok ? '' : ' opacity: 0.45;'}`)}${ok ? '<div style="position: absolute; bottom: -4px; right: -4px; width: 14px; height: 14px; border-radius: 50%; background: #4CC9F0; color: #12131C; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✓</div>' : ''}</div>`;
+    }).join('');
+    const btn = voteRevealed(j)
+      ? `<div class="clickable" onclick="voteOpen('votos')" style="padding: 9px 18px; border-radius: 20px; background: #4CC9F0; color: #12131C; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; white-space: nowrap;">Ver votos</div>`
+      : `<div class="clickable" onclick="voteOpen('votar')" style="padding: 9px 18px; border-radius: 20px; background: #F5B700; color: #12131C; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; white-space: nowrap;">Votar</div>`;
+    return `<div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">${who}<div style="font-size: 11px; color: #9296AD; margin: 0 6px 0 2px; white-space: nowrap;">${n} de ${DB.teamOrder.length}</div>${btn}</div>`;
+  }
+
+  /* ---- Pantalla de votar ---- */
+  function voteScreen(j) {
+    const SGF = "font-family: 'Space Grotesk', sans-serif;";
+    const s = vs(j); const me = state.voteTeam; const nVoted = DB.teamOrder.filter(t => s.voted[t]).length;
+    const what = j === 'T' ? 'del Total' : `de la Jornada ${j}`;
+    const chips = DB.teamOrder.map(t => {
+      const on = t === me;
+      const st = on ? 'border: 2px solid #F5B700; background: rgba(245,183,0,0.10); padding: 9px 13px;' : 'border: 1px solid rgba(255,255,255,0.08); background: #232640; padding: 10px 14px;';
+      const stt = on ? '<span style="color: #F5B700; font-weight: 700;">Votando ahora</span>'
+        : s.voted[t] ? `<span style="color: #4CC9F0; font-weight: 600;">✓ Ya ha votado</span> <span style="color: #9296AD;">· ${esc(fmtVoteTime(s.voted[t]))}</span>` : '<span style="color: #9296AD;">Pendiente</span>';
+      return `<div class="clickable" onclick="voteAskTeam('${esc(t)}')" style="flex: 1; display: flex; align-items: center; gap: 10px; border-radius: 12px; ${st}">
+        ${logo(t, 36)}
+        <div style="min-width: 0;">
+          <div style="${SGF} font-size: 15px; font-weight: 700;">${esc(t)} <span style="font-family: 'Work Sans', sans-serif; font-size: 11px; font-weight: 500; color: #9296AD;">· ${esc(T(t).coach)}</span></div>
+          <div style="font-size: 11px; margin-top: 1px; white-space: nowrap;">${stt}</div>
+        </div>
+      </div>`;
+    }).join('');
+    const step1 = `<div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; align-items: baseline; gap: 10px;">
+          <div style="${SGF} font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #F5B700;">1 · ¿Qué equipo vota?</div>
+          <div style="font-size: 11px; color: #9296AD;">Han votado ${nVoted} de ${DB.teamOrder.length} · los votos no se ven hasta que voten todos y se marque "Mostrar" en el sheet</div>
+        </div>
+        <div class="clickable" onclick="voteClose()" style="font-size: 12px; font-weight: 600; color: #9296AD; white-space: nowrap;">← Volver</div>
+      </div>
+      <div style="display: flex; gap: 12px;">${chips}</div>
+    </div>`;
+
+    let body;
+    if (!me) {
+      body = `<div style="min-height: 320px; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center;">
+        <div style="${SGF} font-size: 22px; font-weight: 700; color: #4A4E63;">Elige tu equipo para empezar a votar</div>
+        <div style="font-size: 13px; color: #9296AD; max-width: 480px;">Votas los premios ${what}: MVP, Máximo asistente, DPOY y 6th Pokémon (1º, 2º y 3º) y los dos ALL-GBA Team (6 pokémon cada uno). No puedes votar a tus propios pokémon.</div>
+      </div>`;
+    } else {
+      const b = state.ballot; const act = state.voteActive; const { per, byKey } = voteCands(j);
+      const slot = (a, i, size, label) => {
+        const k = b[a][i]; const m = k && byKey[k]; const next = a === act && b[a].indexOf(null) === i;
+        const st = m ? 'background: #232640; border: 1px solid rgba(255,255,255,0.10);' : `background: transparent; border: 1px dashed ${next ? '#F5B700' : 'rgba(255,255,255,0.18)'};`;
+        const lab = label ? `<div style="font-size: 9px; font-weight: 700; color: ${next ? '#F5B700' : '#9296AD'}; text-align: center; margin-top: 3px;">${label}</div>` : '';
+        return `<div><div ${m ? `class="clickable" title="${esc(monName(m))} · pulsa para quitar" onclick="event.stopPropagation(); voteClear('${a}', ${i})"` : ''} style="width: ${size}px; height: ${size}px; box-sizing: border-box; border-radius: 10px; display: flex; align-items: center; justify-content: center; ${st}">${m ? `<img src="${sprite(m.poke)}" ${onErr} style="width: ${size - 8}px; height: ${size - 8}px; object-fit: contain;">` : ''}</div>${lab}</div>`;
+      };
+      const block = a => {
+        const on = a === act; const n = b[a].filter(Boolean).length; const full = n === AWN[a]; const ranked = AWN[a] === 3;
+        const st = on ? 'border: 2px solid #F5B700; background: rgba(245,183,0,0.06); padding: 11px;' : 'border: 1px solid rgba(255,255,255,0.08); background: #232640; padding: 12px;';
+        const status = on && !full ? '<span style="color: #F5B700; font-weight: 700;">Eligiendo…</span>' : full ? '<span style="color: #4CC9F0; font-weight: 700;">✓ Completo</span>' : `<span style="color: #9296AD;">${n} de ${AWN[a]}</span>`;
+        const rule = ranked ? '1º 3 pts · 2º 2 pts · 3º 1 pt' : `6 pokémon · ${a === 'first' ? '2 pts' : '1 pt'} cada uno`;
+        return `<div class="clickable" onclick="voteAward('${a}')" style="border-radius: 12px; ${st} display: flex; flex-direction: column; gap: 9px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            ${badge(a, 24)}
+            <div style="flex: 1; min-width: 0;"><div style="${SGF} font-size: 13px; font-weight: 700;">${BADGE[a].name}</div><div style="font-size: 10px; color: #9296AD;">${rule}</div></div>
+            <div style="font-size: 10px; white-space: nowrap;">${status}</div>
+          </div>
+          <div style="display: flex; gap: ${ranked ? 8 : 6}px;">${b[a].map((_, i) => slot(a, i, ranked ? 52 : 38, ranked ? `${i + 1}º` : '')).join('')}</div>
+        </div>`;
+      };
+      const nDone = AWK.filter(a => !b[a].includes(null)).length; const ready = nDone === AWK.length;
+      const sendBtn = `<div ${ready && !state.voteSending ? 'class="clickable" onclick="voteSend()"' : ''} style="margin-top: 4px; padding: 12px; border-radius: 12px; background: ${ready ? '#F5B700' : '#232640'}; color: ${ready ? '#12131C' : '#4A4E63'}; text-align: center; ${SGF} font-size: 14px; font-weight: 700;">${state.voteSending ? 'Enviando…' : 'Enviar votación'}</div>`;
+      const ballotCol = `<div style="width: 330px; flex-shrink: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 10px;">
+        <div>
+          <div style="${SGF} font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #F5B700;">2 · Tu papeleta</div>
+          <div style="font-size: 11px; color: #9296AD; margin-top: 2px;">Pulsa un premio y luego elige sus pokémon a la derecha</div>
+        </div>
+        ${AWK.map(block).join('')}
+        ${sendBtn}
+        <div style="font-size: 10px; color: #9296AD; text-align: center; line-height: 1.4;">${nDone} de ${AWK.length} premios completos${ready ? '' : ' · completa todos para enviar'}.<br>${s.voted[me] ? `${esc(me)} ya votó el ${esc(fmtVoteTime(s.voted[me]))}: si envías, este voto sustituye al anterior.` : 'Puedes volver a votar: el voto nuevo sustituye al anterior.'}</div>
+      </div>`;
+
+      const picks = b[act]; const ranked = AWN[act] === 3; const left = picks.filter(x => !x).length;
+      const hintTitle = left === 0 ? `${BADGE[act].name} · completo` : ranked ? `Eligiendo: ${BADGE[act].name} · te falta el ${picks.indexOf(null) + 1}º` : `Eligiendo: ${BADGE[act].name} · te ${left === 1 ? 'falta 1 pokémon' : `faltan ${left} pokémon`}`;
+      const hint = `<div style="background: rgba(245,183,0,0.08); border: 1px solid rgba(245,183,0,0.35); border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; gap: 12px;">
+        ${badge(act, 30)}
+        <div>
+          <div style="${SGF} font-size: 14px; font-weight: 700; color: #F5B700;">${hintTitle}</div>
+          <div style="font-size: 11px; margin-top: 2px; color: ${state.voteMsg ? '#E63946' : '#9296AD'};${state.voteMsg ? ' font-weight: 600;' : ''}">${state.voteMsg ? esc(state.voteMsg) : 'Pulsa un pokémon para darle el siguiente puesto libre. Pulsa otra vez sobre uno ya elegido para quitarlo.'}</div>
+        </div>
+      </div>`;
+      const tile = (m, locked) => {
+        const i = picks.indexOf(m.key); const sel = i >= 0;
+        const mark = sel ? `<div style="position: absolute; top: -6px; left: -6px; min-width: 24px; height: 20px; padding: 0 4px; box-sizing: border-box; border-radius: 10px; background: #F5B700; color: #12131C; ${SGF} font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center;">${ranked ? `${i + 1}º` : '✓'}</div>` : '';
+        return `<div ${locked ? '' : `class="clickable" onclick="votePick('${esc(m.key)}')"`} style="position: relative; ${sel ? 'background: rgba(245,183,0,0.12); border: 2px solid #F5B700;' : 'background: #232640; border: 2px solid transparent;'} border-radius: 10px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; min-width: 0;">
+          ${mark}
+          <img src="${sprite(m.poke)}" ${onErr} style="width: 64px; height: 64px; object-fit: contain;">
+          <div style="font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;" title="${esc(pretty(m.poke))}">${esc(monName(m))}</div>
+          <div style="font-size: 10px; line-height: 1.35; color: ${m.combats ? '#9296AD' : '#4A4E63'};">${m.kills} ${m.kills === 1 ? 'kill' : 'kills'}<br>${m.combats} ${m.combats === 1 ? 'combate' : 'combates'}</div>
+        </div>`;
+      };
+      const rows = voteOrder(j).map(sig => {
+        const locked = sig === me;
+        return `<div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 14px 16px; display: flex; align-items: center; gap: 14px;">
+          <div style="width: 122px; flex-shrink: 0;">
+            <div style="display: flex; align-items: center; gap: 8px;">${logo(sig, 36)}<div style="min-width: 0;"><div style="${SGF} font-size: 15px; font-weight: 700;">${esc(sig)}</div><div style="font-size: 11px; color: #9296AD; margin-top: 1px;">${esc(T(sig).coach)}</div></div></div>
+            ${locked ? '<div style="font-size: 10px; font-weight: 700; color: #E63946; margin-top: 6px;">🔒 Tus pokémon<br><span style="font-weight: 500; color: #9296AD;">no se pueden votar</span></div>' : ''}
+          </div>
+          <div style="flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px;${locked ? ' opacity: 0.3;' : ''}">${(per[sig] || []).map(m => tile(m, locked)).join('')}</div>
+        </div>`;
+      }).join('');
+      body = `<div style="display: flex; gap: 24px; align-items: flex-start;">${ballotCol}<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px;">${hint}${rows}</div></div>`;
+    }
+
+    // Aviso "Confirmo que soy <equipo>"
+    let modal = '';
+    if (state.voteAsk) {
+      const t = T(state.voteAsk); const again = !!s.voted[state.voteAsk];
+      modal = `<div onclick="voteCancelAsk()" style="position: fixed; inset: 0; z-index: 50; background: rgba(10,11,18,0.78); display: flex; align-items: center; justify-content: center;">
+        <div onclick="event.stopPropagation()" style="width: 460px; max-width: calc(100vw - 32px); box-sizing: border-box; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 28px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">
+          ${logo(t.sig, 72, `border: 3px solid ${t.color};`)}
+          <div style="${SGF} font-size: 22px; font-weight: 700;">¿Eres ${esc(t.sig)}?</div>
+          <div style="font-size: 13px; color: #D8D9E3; line-height: 1.5;">Vas a votar como <b>${esc(t.name)}</b> (${esc(t.coach)}).<br>Cada equipo vota solo por sí mismo.</div>
+          <div style="font-size: 11px; color: #9296AD; line-height: 1.5; background: #232640; border-radius: 10px; padding: 10px 12px;">Si ya votaste desde este dispositivo, verás tu papeleta anterior para revisarla o cambiarla.${again ? `<br>${esc(t.sig)} ya ha votado: al enviar se sustituye su voto anterior.` : ''}</div>
+          <div style="display: flex; gap: 10px; width: 100%; margin-top: 4px;">
+            <div class="clickable" onclick="voteCancelAsk()" style="flex: 1; padding: 11px; border-radius: 12px; background: #232640; color: #D8D9E3; ${SGF} font-size: 13px; font-weight: 700;">Cancelar</div>
+            <div class="clickable" onclick="voteConfirmTeam()" style="flex: 1.6; padding: 11px; border-radius: 12px; background: #F5B700; color: #12131C; ${SGF} font-size: 13px; font-weight: 700;">Confirmo que soy ${esc(t.sig)}</div>
+          </div>
+        </div>
+      </div>`;
+    }
+    return `<div style="padding: 22px 64px 40px; display: flex; flex-direction: column; gap: 16px;">${step1}${body}</div>${modal}`;
+  }
+
+  /* ---- Votos revelados ---- */
+  function voteResults(j) {
+    const SGF = "font-family: 'Space Grotesk', sans-serif;";
+    const votes = vs(j).votes || {}; const voters = DB.teamOrder.filter(t => votes[t]); const { byKey } = voteCands(j);
+    const info = p => byKey[pickKey(p)] || p;
+    const chip = (v, lab) => `<div title="${esc(v)}" style="display: flex; align-items: center; gap: 3px; background: #12131C; border-radius: 10px; padding: 2px 6px 2px 2px;">${logo(v, 16)}<span style="font-size: 10px; font-weight: 700; color: #D8D9E3;">${lab}</span></div>`;
+    const tally = (awards, ptsOf, labOf) => {
+      const map = {};
+      for (const v of voters) for (const a of awards) ((votes[v] || {})[a] || []).forEach((p, i) => {
+        if (!p || !p.poke) return;
+        const k = pickKey(p); const e = map[k] || (map[k] = { p: info(p), pts: 0, top: 0, votes: [] });
+        const pts = ptsOf(a, i); e.pts += pts; if (pts === ptsOf(awards[0], 0)) e.top++; e.votes.push([v, labOf(a, i)]);
+      });
+      return Object.values(map).sort((x, y) => (y.pts - x.pts) || (y.top - x.top) || monName(x.p).localeCompare(monName(y.p)));
+    };
+    const card = a => {
+      const list = tally([a], (_, i) => 3 - i, (_, i) => `${i + 1}º`);
+      const rows = list.map((e, i) => `<div style="display: flex; align-items: center; gap: 10px; background: #232640; border-radius: 10px; padding: 6px 10px;">
+          <div style="${SGF} font-size: 13px; font-weight: 700; color: ${i === 0 ? '#F5B700' : '#9296AD'}; width: 14px;">${i + 1}</div>
+          <div style="position: relative; width: 48px; height: 48px; flex-shrink: 0;"><img src="${sprite(e.p.poke)}" ${onErr} style="width: 48px; height: 48px; object-fit: contain;">${logo(e.p.team, 18, 'position: absolute; bottom: -3px; right: -3px; border: 2px solid #232640;')}</div>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${esc(pretty(e.p.poke))}">${esc(monName(e.p))}</div>
+            <div style="display: flex; gap: 4px; margin-top: 4px;">${e.votes.map(v => chip(v[0], v[1])).join('')}</div>
+          </div>
+          <div style="text-align: right; white-space: nowrap;"><span style="${SGF} font-size: 18px; font-weight: 700;${i === 0 ? ' color: #F5B700;' : ''}">${e.pts}</span> <span style="font-size: 10px; color: #9296AD;">pts</span></div>
+        </div>`).join('') || '<div style="font-size: 12px; color: #4A4E63;">Sin votos</div>';
+      return `<div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">${badge(a, 34)}<div><div style="${SGF} font-weight: 700; font-size: 14px;">${BADGE[a].name}</div><div style="font-size: 10px; color: #9296AD;">${BADGE[a].sub}</div></div></div>
+        ${rows}
+      </div>`;
+    };
+    const gba = tally(['first', 'second'], a => a === 'first' ? 2 : 1, a => a === 'first' ? '1st' : '2nd');
+    const gtile = e => `<div style="background: #232640; border-radius: 10px; padding: 10px; display: flex; align-items: center; gap: 10px; min-width: 0;">
+        <div style="position: relative; width: 56px; height: 56px; flex-shrink: 0;"><img src="${sprite(e.p.poke)}" ${onErr} style="width: 56px; height: 56px; object-fit: contain;">${logo(e.p.team, 20, 'position: absolute; bottom: -3px; right: -3px; border: 2px solid #232640;')}</div>
+        <div style="flex: 1; min-width: 0;">
+          <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px;">
+            <div style="font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${esc(pretty(e.p.poke))}">${esc(monName(e.p))}</div>
+            <div style="white-space: nowrap;"><span style="${SGF} font-size: 16px; font-weight: 700;">${e.pts}</span> <span style="font-size: 9px; color: #9296AD;">pts</span></div>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px;">${e.votes.map(v => chip(v[0], v[1])).join('')}</div>
+        </div>
+      </div>`;
+    const tieAt = n => gba.length > n && gba[n - 1].pts === gba[n].pts;
+    const gblock = (a, sub, items, tie) => `<div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 10px;">${badge(a, 30)}<div><div style="${SGF} font-weight: 700; font-size: 14px;">${BADGE[a].name}</div><div style="font-size: 10px; color: #9296AD;">${sub}${tie ? ' · <span style="color: #F5B700; font-weight: 700;">hay empate a puntos en el corte: lo decidís vosotros</span>' : ''}</div></div></div>
+        <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px;">${items.map(gtile).join('') || '<div style="font-size: 12px; color: #4A4E63;">Sin votos</div>'}</div>
+      </div>`;
+    const rest = gba.slice(12);
+    return `<div style="padding: 22px 64px 40px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="background: rgba(76,201,240,0.08); border: 1px solid rgba(76,201,240,0.35); border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 20px;">🗳️</div>
+          <div>
+            <div style="${SGF} font-size: 14px; font-weight: 700; color: #4CC9F0;">Votos ${j === 'T' ? 'del Total' : `de la Jornada ${j}`} revelados · han votado los ${voters.length} equipos</div>
+            <div style="font-size: 11px; color: #9296AD; margin-top: 2px;">Premios individuales: 1º = 3 pts, 2º = 2, 3º = 1. Esto es solo el recuento: los premios definitivos los decidís vosotros y se apuntan en la pestaña Insignias del sheet.</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">${voters.map(v => logo(v, 28, 'border: 2px solid #4CC9F0;')).join('')}<div class="clickable" onclick="voteClose()" style="font-size: 12px; font-weight: 600; color: #9296AD; margin-left: 12px; white-space: nowrap;">← Volver</div></div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${['mvp', 'asist', 'dpoy', 'sexto'].map(card).join('')}</div>
+      <div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 18px;">
+        ${gblock('first', 'Los 6 pokémon con más puntos · voto al 1st Team = 2 pts, voto al 2nd Team = 1 pt', gba.slice(0, 6), tieAt(6))}
+        <div style="border-top: 1px solid rgba(255,255,255,0.08);"></div>
+        ${gblock('second', 'Los 6 siguientes', gba.slice(6, 12), tieAt(12))}
+        ${rest.length ? `<div style="font-size: 11px; color: #9296AD;"><span style="font-weight: 700; color: #D8D9E3;">También con votos:</span> ${rest.map(e => `${esc(monName(e.p))} (${e.pts})`).join(' · ')}</div>` : ''}
+      </div>
     </div>`;
   }
 
