@@ -727,17 +727,22 @@
     const sel = state.ins;
     const hasJ = j => DB.awards.some(a => a.j === j);
     const hasAny = hasJ('T');
+    // Jornada (o reto) terminada pero sin premios apuntados → vista para votar (ranking de kills + todos los pokémon)
+    const votable = j => !hasJ(j) && (j === 'T' ? DB.jornadas.every(x => x.done) : !!(DB.jornadas[j - 1] && DB.jornadas[j - 1].done));
     const pill = (key, lab, has) => {
       const on = key === sel;
       const cls = on ? (has ? 'pill sel' : 'pill sel-empty') : (has ? 'pill' : 'pill muted');
       return `<div class="${cls}" onclick="setIns('${key}')">${lab}</div>`;
     };
-    const pills = [1, 2, 3, 4].map(j => pill(String(j), `Jornada ${j}`, hasJ(j))).join('') + pill('Total', 'Total', hasAny);
+    const pills = [1, 2, 3, 4].map(j => pill(String(j), `Jornada ${j}`, hasJ(j) || votable(j))).join('') + pill('Total', 'Total', hasAny || votable('T'));
     const isTotal = sel === 'Total'; const j = isTotal ? 'T' : +sel;
-    const sub = isTotal ? 'El escudo en la esquina de cada pokémon indica su equipo — sin necesidad de texto' : 'Vista filtrada por jornada — mismas categorías, solo los datos de esa jornada';
+    const vote = votable(j);
+    const sub = vote ? `${isTotal ? 'Reto terminado' : 'Jornada terminada'} — todos los pokémon de un vistazo para votar los premios`
+      : isTotal ? 'El escudo en la esquina de cada pokémon indica su equipo — sin necesidad de texto' : 'Vista filtrada por jornada — mismas categorías, solo los datos de esa jornada';
     const has = isTotal ? hasAny : hasJ(j);
     let content;
-    if (!has) {
+    if (vote) content = insigniasContent(j, true);
+    else if (!has) {
       const jor = isTotal ? null : DB.jornadas[j - 1];
       const msg = isTotal ? 'Los premios del total los elegís vosotros: aparecerán aquí en cuanto se rellene el bloque TOTAL de la pestaña Insignias del sheet'
         : (jor && jor.done ? `La Jornada ${j} ya está completa · los premios se publicarán en cuanto se apunten en el sheet`
@@ -770,10 +775,10 @@
         r.kills += m.kills; r.combats++;
       }
     }
-    const list = Object.values(map).filter(x => x.kills > 0);
+    const list = Object.values(map);   // todos los pokémon que han jugado algún combate
     list.forEach(x => { x.avg = x.kills / x.combats; });
     list.sort(mode === 'avg' ? (a, b) => b.avg - a.avg || b.kills - a.kills : (a, b) => b.kills - a.kills || a.combats - b.combats);
-    return list.slice(0, 5);
+    return list;
   }
   const jList = js => { const u = [...new Set(js)].sort((a, b) => a - b); return u.length === 1 ? `Jornada ${u[0]}` : `Jornada ${u.slice(0, -1).join(', ')} y ${u[u.length - 1]}`; };
   function groupAwards(type, j) {
@@ -782,7 +787,99 @@
     for (const a of list) { const k = monKey(a); if (!map[k]) { map[k] = { ...a, js: [] }; out.push(map[k]); } map[k].js.push(a.j); }
     return out;
   }
-  function insigniasContent(j) {
+  /* Vista para votar: pokémon de cada equipo (individuales en orden de clasificación, luego equipos conjuntos) */
+  function voteColumn(j) {
+    const isT = j === 'T';
+    const enfs = DB.enfs.filter(e => isT || e.j === j);
+    // Pokémon de un lado en una lista de enfrentamientos: titulares, baneado y suplente; solo cuentan combates/kills como titular
+    const roster = (list, sideOf) => {
+      const map = {}; const out = [];
+      const get = m => { const k = `${m.team}|${m.poke}`; if (!map[k]) { map[k] = { team: m.team, poke: m.poke, nick: '', kills: 0, combats: 0 }; out.push(map[k]); } if (m.nick && !map[k].nick) map[k].nick = m.nick; return map[k]; };
+      for (const e of list) {
+        const lado = sideOf(e); if (!lado) continue;
+        for (const cb of e.combats) {
+          const sd = cb.sides[lado];
+          for (const m of sd.tit) { if (!m.poke) continue; const r = get(m); r.kills += m.kills; r.combats++; }
+          for (const m of [sd.ban, sd.sub]) if (m && m.poke) get(m);
+        }
+      }
+      return out;
+    };
+    const tile = (m, shield) => `
+      <div style="background: #232640; border-radius: 10px; padding: 8px 2px; display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; min-width: 0;">
+        <div style="position: relative; width: 64px; height: 64px;">
+          <img src="${sprite(m.poke)}" ${onErr} style="width: 64px; height: 64px; object-fit: contain;">
+          ${shield ? logo(m.team, 22, 'position: absolute; bottom: -4px; right: -4px; border: 2px solid #232640;') : ''}
+        </div>
+        <div style="font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;" title="${esc(pretty(m.poke))}">${esc(monName(m))}</div>
+        <div style="font-size: 10px; line-height: 1.35; color: ${m.combats ? '#9296AD' : '#4A4E63'};">${m.kills} ${m.kills === 1 ? 'kill' : 'kills'}<br>${m.combats} ${m.combats === 1 ? 'combate' : 'combates'}</div>
+      </div>`;
+    const CARD = 'background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 14px 16px; display: flex; align-items: center; gap: 14px;';
+    const grid = (mons, shield) => `<div style="flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px;">${mons.map(m => tile(m, shield)).join('') || '<div style="grid-column: 1 / -1; font-size: 12px; color: #4A4E63;">Sin pokémon apuntados</div>'}</div>`;
+    const section = (t, sub) => `<div style="display: flex; align-items: baseline; gap: 10px; margin-top: 4px;">
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #F5B700;">${t}</div>
+        <div style="font-size: 11px; color: #9296AD;">${sub}</div>
+      </div>`;
+    const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n);
+
+    // Equipos individuales, en orden de clasificación (de la jornada o general)
+    const st = sig => isT ? DB.stand[sig] : (DB.stand[sig].byJ[j] || { pts: 0, made: 0, recv: 0 });
+    const order = isT ? DB.ranking.map(r => r.sig)
+      : [...DB.teamOrder].sort((a, b) => (st(b).pts - st(a).pts) || ((st(b).made - st(b).recv) - (st(a).made - st(a).recv)) || (DB.teamOrder.indexOf(a) - DB.teamOrder.indexOf(b)));
+    const solo = enfs.filter(e => !e.duo);
+    const indRows = order.map((sig, i) => {
+      const x = st(sig);
+      const mons = roster(solo, e => e.local.includes(sig) ? 'Local' : e.visit.includes(sig) ? 'Visitante' : null);
+      return `<div style="${CARD}">
+        <div style="width: 122px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: ${i === 0 ? '#F5B700' : '#9296AD'}; width: 14px;">${i + 1}</div>
+            ${logo(sig, 36)}
+            <div style="min-width: 0;">
+              <div style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700;">${esc(sig)}</div>
+              <div style="font-size: 11px; color: #9296AD; margin-top: 1px;">${esc(T(sig).coach)}</div>
+            </div>
+          </div>
+          <div style="font-size: 11px; white-space: nowrap; padding-left: 22px;"><span style="color: #F5B700; font-weight: 700;">${x.pts} pts</span> <span style="color: #9296AD;">· ${signed(x.made - x.recv)} KOs</span></div>
+        </div>
+        ${grid(mons, false)}
+      </div>`;
+    }).join('');
+
+    // Equipos conjuntos (2vs2): una fila por pareja, la ganadora primero
+    const duoRows = enfs.filter(e => e.duo).sort((a, b) => (a.j - b.j) || (a.n - b.n)).map(e => {
+      const lados = e.winner === 'Visitante' ? ['Visitante', 'Local'] : ['Local', 'Visitante'];
+      return lados.map(lado => {
+        const sigs = lado === 'Local' ? e.local : e.visit; const op = lado === 'Local' ? 'Visitante' : 'Local';
+        const won = e.winner === lado;
+        return `<div style="${CARD}">
+          <div style="width: 122px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex;">${sigs.map((s, k) => logo(s, 36, `border: 2px solid #1B1D2B;${k ? ' margin-left: -10px;' : ''}`)).join('')}</div>
+            <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; white-space: nowrap;">${sigs.map(esc).join(' &amp; ')}</div>
+            <div style="font-size: 11px; font-weight: 700; color: ${won ? '#4CC9F0' : '#E63946'};">${won ? 'Ganan' : 'Pierden'} ${e.w[lado]}–${e.w[op]}</div>
+            ${isT ? `<div style="font-size: 10px; color: #9296AD;">Jornada ${e.j}</div>` : ''}
+          </div>
+          ${grid(roster([e], () => lado), true)}
+        </div>`;
+      }).join('');
+    }).join('');
+
+    const what = isT ? 'Reto terminado · premios del total' : `Jornada ${j} terminada · premios`;
+    return `<div style="flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0;">
+      <div style="background: rgba(245,183,0,0.08); border: 1px solid rgba(245,183,0,0.35); border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; gap: 12px;">
+        <div style="font-size: 20px;">🗳️</div>
+        <div>
+          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700;">${what} pendientes de votación</div>
+          <div style="font-size: 11px; color: #9296AD; margin-top: 2px;">Estos son todos los pokémon que han jugado ${isT ? 'el reto' : 'la jornada'}. Los premios aparecerán aquí cuando se apunten en el sheet.</div>
+        </div>
+      </div>
+      ${section('Equipos individuales', `En orden de clasificación ${isT ? 'general' : `de la Jornada ${j}`} · kills y combates jugados en enfrentamientos individuales`)}
+      ${indRows}
+      ${duoRows ? section('Equipos conjuntos', `${isT ? 'Enfrentamientos 2vs2 del reto' : 'Enfrentamiento 2vs2 de la jornada'} · el escudo indica de qué equipo es cada pokémon`) + duoRows : ''}
+    </div>`;
+  }
+
+  function insigniasContent(j, vote) {
     const avgMode = state.killMode === 'avg';
     const rank = killRanking(j, state.killMode);
     const nCombats = n => `${n} ${n === 1 ? 'combate' : 'combates'}`;
@@ -841,9 +938,10 @@
       <div style="width: 330px; flex-shrink: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 14px;">
         <div><div style="font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700;">Ranking de kills</div><div style="font-size: 11px; color: #9296AD; margin-top: 2px;">${rankSub}</div></div>
         ${killSelector}
-        ${rankRows}
+        <!-- Lista completa con scroll (se ven ~5 a la vez); al volver a entrar empieza siempre desde el 1 -->
+        <div class="thin-scroll rank-scroll">${rankRows}</div>
       </div>
-      <div style="flex: 1; display: flex; flex-direction: column; gap: 18px; min-width: 0;">
+      ${vote ? voteColumn(j) : `<div style="flex: 1; display: flex; flex-direction: column; gap: 18px; min-width: 0;">
         <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${['mvp', 'asist', 'dpoy', 'sexto'].map(prizeCard).join('')}</div>
         <div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
           <div style="display: flex; flex-direction: column; gap: 12px;">
@@ -858,7 +956,7 @@
             ${state.secondOpen ? teamGrid('second') : ''}
           </div>
         </div>
-      </div>
+      </div>`}
     </div>`;
   }
 
