@@ -58,7 +58,7 @@
     }
     state.voteView = null; state.voteAsk = null; state.voteDone = '';   // la votación se cierra al cambiar de pestaña
     if (state.tab === 'insignias') state.ins = defaultIns();
-    if (state.tab === 'recompensas' && !state.rw.spinning) Object.assign(state.rw, { j: recDefaultJ(), view: null, team: null, ask: null, msg: '', done: '', genAsk: false, sure: false });
+    if (state.tab === 'recompensas' && !state.rw.spinning) Object.assign(state.rw, { j: recDefaultJ(), anexo: null, view: null, team: null, ask: null, msg: '', done: '', genAsk: false, sure: false });
     render();
     window.scrollTo(0, 0);
   }
@@ -1324,6 +1324,33 @@
     else if (rec()) for (const p of (rec().pool || [])) if (out[p.tier] && !out[p.tier].includes(p.label)) out[p.tier].push(p.label);
     return out;
   }
+  // Anexo: objetos que entran en una recompensa genérica (Mega piedra, Objeto competitivo...)
+  const normTxt = x => String(x || '').trim().toLowerCase();
+  const anexoOf = label => { const r = rec(); return r && r.anexo ? r.anexo.filter(a => normTxt(a.cat) === normTxt(label)) : []; };
+  window.rwAnexo = label => { state.rw.anexo = label || null; render(); };
+  function anexoModal() {
+    const label = state.rw.anexo; if (!label) return '';
+    const items = anexoOf(label); const groups = []; const by = {};
+    for (const it of items) { const g = it.group || ''; if (!by[g]) { by[g] = []; groups.push(g); } by[g].push(it); }
+    const t = tierOf(state.rw.j, label);
+    return `<div onclick="rwAnexo()" style="position: fixed; inset: 0; z-index: 60; background: rgba(10,11,18,0.78); display: flex; align-items: center; justify-content: center; padding: 24px;">
+      <div onclick="event.stopPropagation()" style="width: 920px; max-width: 100%; max-height: 100%; box-sizing: border-box; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">
+        <div style="padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+          <div><div style="font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px;">Anexo · qué entra en esta recompensa</div><div style="display: flex; align-items: center; gap: 10px; margin-top: 2px;"><div style="${SGF} font-size: 22px; font-weight: 700;">${esc(label)}</div>${t ? tchip(t) : ''}<div style="font-size: 12px; color: #9296AD;">${items.length} objetos · quien gana la recompensa elige uno</div></div></div>
+          <div class="clickable" onclick="rwAnexo()" style="width: 32px; height: 32px; border-radius: 50%; background: #232640; color: #D8D9E3; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; flex-shrink: 0;">✕</div>
+        </div>
+        <div class="thin-scroll" style="padding: 18px 24px 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;">
+          ${groups.map(g => `<div style="display: flex; flex-direction: column; gap: 8px;">
+            ${groups.length > 1 || g ? `<div style="${SGF} font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #F5B700;">${esc(g || 'Objetos')} <span style="color: #9296AD; font-weight: 500;">· ${by[g].length}</span></div>` : ''}
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px;">${by[g].map(it => `<div style="background: #232640; border-radius: 8px; padding: 6px 10px; display: flex; align-items: center; gap: 8px; min-width: 0;">
+              <div style="width: 28px; height: 28px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">${it.icon ? `<img src="${itemImg(it.icon)}" ${onErr} style="width: 28px; height: 28px; object-fit: contain;">` : ''}</div>
+              <div style="font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${esc(it.name)}">${esc(it.name)}</div>
+            </div>`).join('')}</div>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
   const tierOf = (j, label) => { const p = recPool(j); for (const t of [1, 2, 3, 4]) if (p[t].includes(label)) return t; return 0; };
   function recDefaultJ() { for (let j = 4; j >= 1; j--) if (DB.jornadas[j - 1] && DB.jornadas[j - 1].done) return j; return 1; }
   const rwKey = (j, team) => `reto-ruletas-${CFG.SHEET_ID || 'local'}-${j}-${team}`;
@@ -1374,7 +1401,7 @@
     const r = await fetch(VOTE_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
     const d = await r.json(); if (!d || !d.ok) throw new Error((d && d.error) || 'El sheet no ha aceptado el envío'); return d;
   }
-  window.setRecJ = j => { const s = state.rw; s.j = j; s.view = null; s.team = null; s.ask = null; s.msg = ''; s.genAsk = false; render(); };
+  window.setRecJ = j => { const s = state.rw; s.j = j; s.anexo = null; s.view = null; s.team = null; s.ask = null; s.msg = ''; s.genAsk = false; render(); };
   window.rwGenerate = async () => {
     const s = state.rw; if (s.busy) return;
     if (!s.genAsk) { s.genAsk = true; render(); return; }
@@ -1495,7 +1522,7 @@
       </div>`;
     const tierCards = [1, 2, 3, 4].map(t => `<div style="${RCARD} border-top: 3px solid ${TCOL[t]}; padding: 16px; display: flex; flex-direction: column; gap: 8px;">
         <div style="display: flex; align-items: center; justify-content: space-between;"><div style="${SGF} font-size: 16px; font-weight: 700;">Tier ${t}</div><div style="font-size: 11px; color: #9296AD;">${t === 1 ? 'lo mejor' : t === 4 ? 'lo peor' : ''}</div></div>
-        ${pool[t].map(x => `<div style="background: #232640; border-radius: 8px; padding: 7px 10px; font-size: 13px; font-weight: 600;">${esc(x)}</div>`).join('') || '<div style="font-size: 12px; color: #4A4E63;">Sin recompensas</div>'}
+        ${pool[t].map(x => { const n = anexoOf(x).length; return n ? `<div class="clickable" onclick="rwAnexo('${esc(x).replace(/'/g, '&#39;')}')" title="Ver qué objetos incluye" style="background: #232640; border: 1px solid rgba(245,183,0,0.35); border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; gap: 8px;"><span>${esc(x)}</span><span style="font-size: 11px; font-weight: 600; color: #F5B700; white-space: nowrap;">ver los ${n} ›</span></div>` : `<div style="background: #232640; border-radius: 8px; padding: 7px 10px; font-size: 13px; font-weight: 600;">${esc(x)}</div>`; }).join('') || '<div style="font-size: 12px; color: #4A4E63;">Sin recompensas</div>'}
       </div>`).join('');
     const probs = `<div style="display: grid; grid-template-columns: 90px repeat(5, minmax(0, 1fr)); gap: 10px 8px; align-items: center;">
         ${['', 'Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Bonus'].map(h => `<div style="font-size: 10px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">${h}</div>`).join('')}
@@ -1529,7 +1556,7 @@
       </div>` : ''}
       <div style="display: flex; gap: 18px;">${globalCard(j)}${rules}</div>
       ${reparto}
-      ${eyebrow('Recompensas por tier', wheels ? `Las que entraron en las ruletas de la Jornada ${j}` : 'Lo que puede tocar en las ruletas · se edita en la hoja Recompensas del sheet')}
+      ${eyebrow('Recompensas por tier', (wheels ? `Las que entraron en las ruletas de la Jornada ${j}` : 'Lo que puede tocar en las ruletas · se edita en la hoja Recompensas del sheet') + ' · las marcadas en dorado tienen anexo con la lista de objetos')}
       <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${tierCards}</div>
       ${eyebrow('Las ruletas', '4 ruletas de 20 casillas, de mejor a peor · cada casilla es un 5%')}
       <div style="display: flex; gap: 18px; align-items: stretch;">
@@ -1538,7 +1565,7 @@
         </div>
         <div style="flex: 1; ${done ? gold : RCARD} border-radius: 16px; padding: 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center;">${cta}</div>
       </div>
-    </div>`;
+    </div>${anexoModal()}`;
   }
 
   /* ---- pantalla de tirar ---- */
