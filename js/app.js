@@ -1713,9 +1713,9 @@
     const pill = (k, lab) => k === state.rules
       ? `<a onclick="setRules('${k}')" style="padding: 8px 16px; border-radius: 20px; background: #F5B700; color: #12131C; font-size: 13px; font-weight: 700;">${lab}</a>`
       : `<a onclick="setRules('${k}')" style="padding: 8px 16px; border-radius: 20px; background: #232640; color: #9296AD; font-size: 13px; font-weight: 600;">${lab}</a>`;
-    const gal = DB.gallery.map(g => `
+    const gal = DB.gallery.map((g, i) => `
       <div style="display: flex; flex-direction: column; gap: 6px;">
-        <div style="aspect-ratio: 4/3; background: #232640; border-radius: 10px; overflow: hidden;"><img src="${A}/galeria/${encodeURIComponent(g.file)}" ${onErr} style="width: 100%; height: 100%; object-fit: cover;"></div>
+        <div class="clickable" onclick="openPhoto(${i})" title="Pulsa para ver la foto completa" style="aspect-ratio: 4/3; background: #232640; border-radius: 10px; overflow: hidden; cursor: zoom-in;"><img src="${A}/galeria/${encodeURIComponent(g.file)}" ${onErr} style="width: 100%; height: 100%; object-fit: cover;"></div>
         <div style="font-size: 11px; color: #9296AD;">${esc([g.date, g.title].filter(Boolean).join(' · '))}</div>
         ${g.quote ? `<div style="font-size: 12px;">"${esc(g.quote.replace(/^["“«]|["”»]$/g, ''))}"</div>` : ''}
       </div>`).join('');
@@ -1738,7 +1738,7 @@
         <div onclick="toggleGal()" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
           <div style="font-size: 14px; color: #F5B700; font-weight: 700;">${state.galOpen ? '▾' : '▸'}</div>
           <div style="font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700;">Galería</div>
-          <div style="font-size: 12px; color: #9296AD;">— ${state.galOpen ? 'desplázate para ver más momentos' : 'toca para desplegar'}</div>
+          <div style="font-size: 12px; color: #9296AD;">— ${state.galOpen ? 'pulsa una foto para verla completa' : 'toca para desplegar'}</div>
         </div>
         ${state.galOpen ? galBody : ''}
       </div>
@@ -1746,6 +1746,33 @@
   }
   window.setRules = k => { state.rules = k; render(); };
   window.toggleGal = () => { state.galOpen = !state.galOpen; render(); };
+  // Visor de fotos: la foto entera (sin recortar), con flechas para pasar a la anterior o la siguiente
+  let photoIdx = 0;
+  function photoKeys(ev) { if (ev.key === 'Escape') closePhoto(); else if (ev.key === 'ArrowRight') stepPhoto(1); else if (ev.key === 'ArrowLeft') stepPhoto(-1); }
+  function paintPhoto() {
+    const m = document.getElementById('photo-modal'); if (!m) return; const g = DB.gallery[photoIdx]; const n = DB.gallery.length;
+    const arrow = (d, ch) => n > 1 ? `<div class="clickable" onclick="event.stopPropagation(); stepPhoto(${d})" style="position: absolute; top: 50%; ${d < 0 ? 'left' : 'right'}: 18px; margin-top: -24px; width: 48px; height: 48px; border-radius: 50%; background: rgba(27,29,43,0.9); border: 1px solid rgba(255,255,255,0.15); color: #F4F1EA; font-size: 24px; display: flex; align-items: center; justify-content: center; user-select: none;">${ch}</div>` : '';
+    const cap = [g.date, g.title].filter(Boolean).join(' · ');
+    m.innerHTML = `
+      <div class="clickable" onclick="closePhoto()" style="position: absolute; top: 16px; right: 18px; width: 40px; height: 40px; border-radius: 50%; background: rgba(27,29,43,0.9); border: 1px solid rgba(255,255,255,0.15); color: #F4F1EA; font-size: 17px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✕</div>
+      ${arrow(-1, '‹')}${arrow(1, '›')}
+      <div onclick="event.stopPropagation()" style="display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 100%; max-height: 100%;">
+        <img src="${A}/galeria/${encodeURIComponent(g.file)}" style="max-width: min(1280px, calc(100vw - 160px)); max-height: calc(100vh - 150px); object-fit: contain; border-radius: 10px; background: #232640;">
+        <div style="text-align: center; max-width: 900px;">
+          ${cap ? `<div style="font-size: 12px; color: #9296AD;">${esc(cap)}${n > 1 ? ` · ${photoIdx + 1} de ${n}` : ''}</div>` : ''}
+          ${g.quote ? `<div style="font-size: 15px; margin-top: 4px;">"${esc(g.quote.replace(/^["“«]|["”»]$/g, ''))}"</div>` : ''}
+        </div>
+      </div>`;
+  }
+  window.openPhoto = i => {
+    closePhoto(); photoIdx = i;
+    const m = document.createElement('div'); m.id = 'photo-modal';
+    m.style.cssText = 'position: fixed; inset: 0; z-index: 100; background: rgba(8,9,14,0.92); display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box;';
+    m.onclick = closePhoto; document.body.appendChild(m); document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', photoKeys); paintPhoto();
+  };
+  window.stepPhoto = d => { const n = DB.gallery.length; photoIdx = (photoIdx + d + n) % n; paintPhoto(); };
+  window.closePhoto = () => { const m = document.getElementById('photo-modal'); if (m) m.remove(); document.body.style.overflow = ''; document.removeEventListener('keydown', photoKeys); };
 
   /* ---------------- arranque ---------------- */
   async function start() {
