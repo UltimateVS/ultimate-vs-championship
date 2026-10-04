@@ -43,11 +43,12 @@
   }
 
   /* ---------------- navegación (hash) ---------------- */
-  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '' };
+  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '',
+    rw: { j: 1, view: null, team: null, ask: null, wheel: '1', rot: 0, spinning: false, draft: null, last: null, msg: '', done: '', busy: false, sure: false, genAsk: false } };
 
   function route() {
     const [tab, arg] = (location.hash.replace('#', '') || 'inicio').split('/');
-    state.tab = ['inicio', 'equipos', 'clasificacion', 'jornadas', 'insignias', 'historia'].includes(tab) ? tab : 'inicio';
+    state.tab = ['inicio', 'equipos', 'clasificacion', 'jornadas', 'insignias', 'recompensas', 'historia'].includes(tab) ? tab : 'inicio';
     if (state.tab === 'equipos' && arg && DB.teams[arg]) { if (state.team !== arg) state.medOpen = false; state.team = arg; }
     if (state.tab === 'jornadas' && arg && DB.enfById[arg]) {
       const e = DB.enfById[arg];
@@ -57,6 +58,7 @@
     }
     state.voteView = null; state.voteAsk = null; state.voteDone = '';   // la votación se cierra al cambiar de pestaña
     if (state.tab === 'insignias') state.ins = defaultIns();
+    if (state.tab === 'recompensas' && !state.rw.spinning) Object.assign(state.rw, { j: recDefaultJ(), view: null, team: null, ask: null, msg: '', done: '', genAsk: false, sure: false });
     render();
     window.scrollTo(0, 0);
   }
@@ -65,8 +67,9 @@
   function render() {
     document.querySelectorAll('.mainnav a').forEach(a => a.classList.toggle('active', a.dataset.tab === state.tab));
     const app = document.getElementById('app');
-    const fn = { inicio: renderInicio, equipos: renderEquipos, clasificacion: renderClasif, jornadas: renderJornadas, insignias: renderInsignias, historia: renderHistoria }[state.tab];
+    const fn = { inicio: renderInicio, equipos: renderEquipos, clasificacion: renderClasif, jornadas: renderJornadas, insignias: renderInsignias, recompensas: renderRecompensas, historia: renderHistoria }[state.tab];
     app.innerHTML = fn();
+    if (state.tab === 'recompensas') rwDraw();
     if (state.tab === 'inicio') startCountdown();
   }
 
@@ -258,8 +261,9 @@
       </div>`).join('');
     const has = s.played > 0;
     const bal = (lab, v) => `<div style="display: flex; justify-content: space-between; font-size: 14px;"><span style="color: #9296AD;">${lab}</span><span style="font-weight: 600;">${has ? v : '—'}</span></div>`;
+    const rw = teamRewards(sig);   // recompensas de las ruletas (si la votación/recompensas están conectadas)
     return `
-    <div style="margin: 0 64px 40px; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; display: flex; gap: 32px;">
+    <div style="margin: 0 64px ${rw ? 18 : 40}px; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; display: flex; gap: 32px;">
       <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; width: 180px; flex-shrink: 0;">
         ${logo(sig, 130, `border: 3px solid ${t.color};`)}
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 19px; font-weight: 700; text-align: center;">${esc(t.name)}</div>
@@ -281,7 +285,7 @@
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase;">Balance</div>
         ${bal('Enfrentamientos ganados', s.ewon)}${bal('Enfrentamientos perdidos', s.elost)}${bal('Combates ganados', s.won)}${bal('Combates perdidos', s.lost)}${bal('KOs a favor', s.made)}${bal('KOs en contra', s.recv)}
       </div>
-    </div>`;
+    </div>${rw}`;
   }
   const ORDER_T = ['mvp', 'asist', 'dpoy', 'sexto', 'first', 'second'];
   function medalIcons(list, label) {
@@ -985,7 +989,7 @@
      (CFG.VOTE_URL). Si VOTE_URL está vacío, la web funciona como antes.
      ===================================================================== */
   const VOTE_URL = String(CFG.VOTE_URL || '').trim();
-  const VOTE = { data: null, loading: false, error: '', at: 0 };
+  const VOTE = { data: null, rec: null, loading: false, error: '', at: 0 };
   const AWK = ['mvp', 'asist', 'dpoy', 'sexto', 'first', 'second'];
   const AWN = { mvp: 3, asist: 3, dpoy: 3, sexto: 3, first: 6, second: 6 };
   const sk = j => j === 'T' ? 'T' : String(j);
@@ -1001,10 +1005,10 @@
       const r = await fetch(VOTE_URL + (VOTE_URL.includes('?') ? '&' : '?') + 't=' + Date.now());
       const d = await r.json();
       if (!d || !d.ok) throw new Error((d && d.error) || 'respuesta no válida');
-      VOTE.data = d.scopes || {}; VOTE.error = '';
+      VOTE.data = d.scopes || {}; VOTE.rec = d.rec || null; VOTE.error = '';
     } catch (err) { VOTE.error = 'No se ha podido conectar con la votación'; }
     VOTE.loading = false;
-    if (state.tab === 'insignias') render();
+    if (['insignias', 'recompensas', 'equipos'].includes(state.tab) && !state.rw.spinning) render();
   }
 
   // Orden de los equipos: clasificación de la jornada (o general en el Total)
@@ -1286,6 +1290,363 @@
         ${gblock('second', 'Los 6 siguientes', gba.slice(6, 12), tieAt(12))}
         ${rest.length ? `<div style="font-size: 11px; color: #9296AD;"><span style="font-weight: 700; color: #D8D9E3;">También con votos:</span> ${rest.map(e => `${esc(monName(e.p))} (${e.pts})`).join(' · ')}</div>` : ''}
       </div>
+    </div>`;
+  }
+
+  /* =====================================================================
+     5-ter · RECOMPENSAS (ruletas por jornada)
+     Datos en el Google Sheet a través del mismo Apps Script de la votación
+     (hojas Recompensas, Ruletas y Reparto). La página guía con las normas
+     de cada puesto, pero no bloquea: siempre deja tirar.
+     ===================================================================== */
+  const TCOL = { 0: '#E63946', 1: '#F5B700', 2: '#4CC9F0', 3: '#3E8F7E', 4: '#565B78' };
+  const TINK = { 0: '#F4F1EA', 1: '#12131C', 2: '#12131C', 3: '#F4F1EA', 4: '#F4F1EA' };
+  const RW_DIST = { 1: [7, 7, 4, 1], 2: [3, 7, 6, 3], 3: [1, 5, 8, 5], 4: [0, 3, 8, 8] };   // casillas de tier 1-4 por ruleta (+1 bonus = 20)
+  const RW_RAND = [[1, 2], [2, 4], [3, 6], [4, 8]];                                          // ruleta aleatoria: destino, nº de casillas
+  const RW_PLAN = { 1: [4, 0], 2: [3, 1], 3: [2, 2], 4: [1, 3] };                             // [a elegir, aleatorias]
+  const RW_RULE = { 1: '4 a elegir · máximo 2 por ruleta', 2: '3 a elegir (máximo 2 por ruleta y solo 1 en la Ruleta 1) + 1 aleatoria', 3: '1 a elegir entre R1 y R2, 1 a elegir entre R3 y R4 + 2 aleatorias', 4: '1 a elegir entre R1 y R2 + 3 aleatorias' };
+  const rwLimit = pos => ({ 1: pos <= 2 ? 2 : 1, 2: 2 });                                     // máximo total (elegidas + aleatorias) en R1 y R2
+  const SGF = "font-family: 'Space Grotesk', sans-serif;";
+  const RCARD = 'background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;';
+  const rnd = n => { const a = new Uint32Array(1); const lim = Math.floor(4294967296 / n) * n; do { crypto.getRandomValues(a); } while (a[0] >= lim); return a[0] % n; };
+  const shuffle = arr => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const k = rnd(i + 1); [a[i], a[k]] = [a[k], a[i]]; } return a; };
+  const spread20 = flat => { const out = Array(20); flat.forEach((s, i) => { out[(i * 7) % 20] = s; }); return out; };
+  const RAND_SLOTS = (() => { const f = []; for (const [r, n] of RW_RAND) for (let i = 0; i < n; i++) f.push({ tier: r, label: 'Ruleta ' + r, dest: r }); return spread20(f); })();
+
+  const rec = () => VOTE.rec || null;
+  const recWheels = j => { const r = rec(); return r && r.wheels && r.wheels[String(j)] ? r.wheels[String(j)] : null; };
+  const recGot = (j, team) => { const r = rec(); const x = r && r.rewards && r.rewards[String(j)]; return x && x[team] ? x[team] : null; };
+  const recGlobal = j => { const r = rec(); return (r && r.global && r.global[String(j)]) || ''; };
+  // Recompensas por tier de una jornada: si ya tiene ruletas, las de sus ruletas (no cambia aunque luego se edite el sheet); si no, las del sheet
+  function recPool(j) {
+    const out = { 1: [], 2: [], 3: [], 4: [] }; const w = recWheels(j);
+    if (w) { for (const k of ['1', '2', '3', '4']) for (const s of (w[k] || [])) if (s.tier >= 1 && s.tier <= 4 && !out[s.tier].includes(s.label)) out[s.tier].push(s.label); }
+    else if (rec()) for (const p of (rec().pool || [])) if (out[p.tier] && !out[p.tier].includes(p.label)) out[p.tier].push(p.label);
+    return out;
+  }
+  const tierOf = (j, label) => { const p = recPool(j); for (const t of [1, 2, 3, 4]) if (p[t].includes(label)) return t; return 0; };
+  function recDefaultJ() { for (let j = 4; j >= 1; j--) if (DB.jornadas[j - 1] && DB.jornadas[j - 1].done) return j; return 1; }
+  const rwKey = (j, team) => `reto-ruletas-${CFG.SHEET_ID || 'local'}-${j}-${team}`;
+  const newDraft = () => ({ rows: [], pending: null, boost: false });
+  function draftLoad(j, team) {
+    try { const d = JSON.parse(localStorage.getItem(rwKey(j, team)) || 'null'); if (d && Array.isArray(d.rows)) return d; } catch (e) { /* nada */ }
+    const got = recGot(j, team);   // equipo ya confirmado: se parte de lo confirmado para poder corregirlo
+    if (got) return { rows: got.rows.filter(r => r.kind !== 'global').map(r => ({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind === 'aleatoria' ? 'aleatoria' : 'elegida', boost: !!r.boost })), pending: null, boost: false };
+    return newDraft();
+  }
+  const draftSave = () => { const s = state.rw; if (!s.team) return; try { localStorage.setItem(rwKey(s.j, s.team), JSON.stringify(s.draft)); } catch (e) { /* nada */ } };
+  const draftPeek = (j, team) => { try { const d = JSON.parse(localStorage.getItem(rwKey(j, team)) || 'null'); return d && Array.isArray(d.rows) ? d : null; } catch (e) { return null; } };
+  function rwCounts(d) { const c = { 1: 0, 2: 0, 3: 0, 4: 0 }, ch = { 1: 0, 2: 0, 3: 0, 4: 0 }; let nc = 0, nr = 0; for (const r of d.rows) { c[r.wheel]++; if (r.kind === 'aleatoria') nr++; else { ch[r.wheel]++; nc++; } } return { c, ch, nc, nr }; }
+  const rwFull = (pos, d, w) => { const lim = rwLimit(pos)[w]; return !!lim && rwCounts(d).c[w] >= lim; };
+
+  // Avisos (no bloquean): qué norma se saltaría la tirada que se va a hacer
+  function rwWarnings(pos, d, w) {
+    const { c, ch, nc, nr } = rwCounts(d); const [pc, pr] = RW_PLAN[pos]; const out = [];
+    if (w === 'A') {
+      if (!d.pending && nr >= pr) out.push(pr ? `Ya has usado tus ${pr} tirada${pr > 1 ? 's' : ''} aleatoria${pr > 1 ? 's' : ''}.` : 'El 1º no tiene tiradas aleatorias.');
+      return out;
+    }
+    const n = +w; const lim = rwLimit(pos)[n];
+    if (lim && c[n] >= lim) out.push(`Ya llevas ${c[n]} tirada${c[n] > 1 ? 's' : ''} en la Ruleta ${n}, que es tu máximo.`);
+    if (d.pending) {
+      if (n < d.pending) out.push(`La aleatoria te mandó a la Ruleta ${d.pending}: la Ruleta ${n} es de mayor rango.`);
+      return out;
+    }
+    if (d.boost) return out;   // repetir tirada por bonus
+    if (nc >= pc) out.push(`Ya has usado tus ${pc} tirada${pc > 1 ? 's' : ''} a elegir.${nr < pr ? ' Te quedan aleatorias: tira primero la ruleta "Aleatoria".' : ''}`);
+    else if (pos <= 2 && ch[n] >= 2) out.push('Máximo 2 tiradas a elegir por ruleta.');
+    else if (pos === 2 && n === 1 && ch[1] >= 1) out.push('El 2º solo puede elegir 1 vez la Ruleta 1.');
+    else if (pos >= 3 && n <= 2 && ch[1] + ch[2] >= 1) out.push('Ya has usado tu tirada a elegir entre la Ruleta 1 y la 2.');
+    else if (pos === 3 && n >= 3 && ch[3] + ch[4] >= 1) out.push('Ya has usado tu tirada a elegir entre la Ruleta 3 y la 4.');
+    return out;
+  }
+  function rwGuide(pos, d) {
+    const { nc, nr } = rwCounts(d); const [pc, pr] = RW_PLAN[pos];
+    if (d.boost) return 'Ha salido bonus: vuelve a tirar. Lo que salga se apunta con boost.';
+    if (d.pending) return rwFull(pos, d, d.pending) ? `La aleatoria te mandó a la Ruleta ${d.pending}, que ya tienes llena: elige una de menor rango.` : `Tirada aleatoria: tira en la Ruleta ${d.pending}. Si vuelves a tirar la "Aleatoria", sustituye este resultado.`;
+    if (nc < pc) return `Te queda${pc - nc > 1 ? 'n' : ''} ${pc - nc} tirada${pc - nc > 1 ? 's' : ''} a elegir.`;
+    if (nr < pr) return `Te queda${pr - nr > 1 ? 'n' : ''} ${pr - nr} aleatoria${pr - nr > 1 ? 's' : ''}: tira la ruleta "Aleatoria".`;
+    return 'Has hecho todas tus tiradas. Revisa la lista y confirma.';
+  }
+
+  /* ---- acciones ---- */
+  async function recPost(body) {
+    const r = await fetch(VOTE_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+    const d = await r.json(); if (!d || !d.ok) throw new Error((d && d.error) || 'El sheet no ha aceptado el envío'); return d;
+  }
+  window.setRecJ = j => { const s = state.rw; s.j = j; s.view = null; s.team = null; s.ask = null; s.msg = ''; s.genAsk = false; render(); };
+  window.rwGenerate = async () => {
+    const s = state.rw; if (s.busy) return;
+    if (!s.genAsk) { s.genAsk = true; render(); return; }
+    const pool = { 1: [], 2: [], 3: [], 4: [] }; for (const p of (rec().pool || [])) if (pool[p.tier]) pool[p.tier].push(p.label);
+    const wheels = {};
+    for (const w of [1, 2, 3, 4]) {
+      const flat = [];
+      for (let t = 1; t <= 4; t++) {
+        const n = RW_DIST[w][t - 1]; if (!n) continue;
+        if (!pool[t].length) { s.msg = `No hay recompensas de tier ${t} en la hoja Recompensas del sheet.`; s.genAsk = false; render(); return; }
+        let bag = []; for (let i = 0; i < n; i++) { if (!bag.length) bag = shuffle(pool[t]); flat.push({ tier: t, label: bag.pop() }); }
+      }
+      flat.push({ tier: 0, label: 'BONUS' }); wheels[w] = spread20(flat);
+    }
+    s.busy = true; s.msg = ''; render();
+    try { await recPost({ action: 'ruletas', scope: String(s.j), wheels }); s.genAsk = false; await voteLoad(true); }
+    catch (err) { s.msg = 'No se han podido generar las ruletas: ' + (err.message || 'error de conexión'); }
+    s.busy = false; render();
+  };
+  window.rwOpen = () => { const s = state.rw; s.view = 'tirar'; s.team = null; s.ask = null; s.msg = ''; s.last = null; render(); window.scrollTo(0, 0); };
+  window.rwClose = () => { const s = state.rw; s.view = null; s.ask = null; render(); window.scrollTo(0, 0); };
+  window.rwAsk = t => { state.rw.ask = t; render(); };
+  window.rwCancelAsk = () => { state.rw.ask = null; render(); };
+  window.rwConfirmTeam = () => { const s = state.rw; s.team = s.ask; s.ask = null; s.draft = draftLoad(s.j, s.team); s.wheel = s.draft.pending ? String(s.draft.pending) : '1'; s.rot = 0; s.last = null; s.msg = ''; s.sure = false; render(); };
+  window.rwTab = w => { const s = state.rw; if (s.spinning) return; s.wheel = w; s.rot = 0; render(); };
+  window.rwDelete = i => { const s = state.rw; if (s.spinning) return; s.draft.rows.splice(i, 1); s.sure = false; draftSave(); render(); };
+  window.rwSpin = () => {
+    const s = state.rw; if (s.spinning || !s.team) return;
+    const slots = s.wheel === 'A' ? RAND_SLOTS : recWheels(s.j)[s.wheel]; const idx = rnd(20); const off = 2 + rnd(140) / 10;
+    const want = ((-(idx * 18 + off)) % 360 + 360) % 360; const delta = ((want - (s.rot % 360)) % 360 + 360) % 360;
+    s.rot += 360 * 6 + delta; s.spinning = true;
+    const cv = document.getElementById('rw-wheel'); const btn = document.getElementById('rw-spin');
+    const ms = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) ? 500 : 4600;
+    if (btn) { btn.textContent = 'Girando…'; btn.style.background = '#232640'; btn.style.color = '#4A4E63'; }
+    if (cv) { cv.style.transition = `transform ${ms}ms cubic-bezier(0.12, 0.72, 0.08, 1)`; cv.style.transform = `rotate(${s.rot}deg)`; }
+    const w = s.wheel;
+    setTimeout(() => { s.spinning = false; s.rot = s.rot % 360; rwLand(w, slots[idx]); }, ms + 80);
+  };
+  function rwLand(w, slot) {
+    const s = state.rw; const d = s.draft; const pos = voteOrder(s.j).indexOf(s.team) + 1; s.sure = false;
+    if (w === 'A') {
+      const replaced = d.pending; d.pending = slot.dest;
+      let go = slot.dest; if (rwFull(pos, d, go)) { for (let k = go + 1; k <= 4; k++) if (!rwFull(pos, d, k)) { go = k; break; } }
+      s.last = { t: slot.dest, big: `Te toca la Ruleta ${slot.dest}`, small: (replaced ? `Sustituye a la anterior (Ruleta ${replaced}). ` : '') + (rwFull(pos, d, slot.dest) ? 'Ya la tienes llena: puedes elegir una de menor rango.' : 'Ahora tira en ella.') };
+      s.wheel = String(go); s.rot = 0;
+    } else if (slot.tier === 0) {
+      d.boost = true; s.last = { t: 0, chip: 'BONUS', big: 'Bonus: vuelve a tirar', small: 'No es una recompensa. Lo siguiente que te salga se apunta como "Boost + recompensa".' };
+    } else {
+      const kind = d.pending ? 'aleatoria' : 'elegida'; const boost = !!d.boost;
+      d.rows.push({ label: slot.label, tier: slot.tier, wheel: w, kind, boost }); d.boost = false; if (kind === 'aleatoria') d.pending = null;
+      s.last = { t: slot.tier, chip: 'Tier ' + slot.tier, big: (boost ? 'Boost + ' : '') + slot.label, small: `Ruleta ${w}${kind === 'aleatoria' ? ' · tirada aleatoria' : ''}` };
+    }
+    draftSave(); if (state.tab === 'recompensas') render();
+  }
+  window.rwConfirm = async () => {
+    const s = state.rw; if (s.busy || s.spinning || !s.draft.rows.length) return;
+    const pos = voteOrder(s.j).indexOf(s.team) + 1; const { nc, nr } = rwCounts(s.draft); const [pc, pr] = RW_PLAN[pos];
+    if ((nc !== pc || nr !== pr || s.draft.pending || s.draft.boost) && !s.sure) { s.sure = true; render(); return; }
+    const g = recGlobal(s.j); const rows = [];
+    if (g) rows.push({ label: g, tier: tierOf(s.j, g), wheel: '', kind: 'global', boost: false });
+    for (const r of s.draft.rows) rows.push({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind, boost: !!r.boost });
+    s.busy = true; s.msg = ''; render();
+    try {
+      await recPost({ action: 'recompensas', scope: String(s.j), team: s.team, rows });
+      try { localStorage.removeItem(rwKey(s.j, s.team)); } catch (e) { /* nada */ }
+      s.busy = false; s.view = null; s.done = `Recompensas de ${s.team} confirmadas`; s.team = null; await voteLoad(true); render(); window.scrollTo(0, 0);
+    } catch (err) { s.busy = false; s.msg = 'No se han podido confirmar: ' + (err.message || 'error de conexión') + '. Tus tiradas siguen guardadas en este dispositivo.'; render(); }
+  };
+
+  /* ---- piezas ---- */
+  const tchip = (t, txt) => `<span style="display: inline-block; padding: 3px 9px; border-radius: 10px; background: ${TCOL[t]}; color: ${TINK[t]}; ${SGF} font-size: 11px; font-weight: 700; white-space: nowrap;">${txt || 'Tier ' + t}</span>`;
+  const wchip = txt => `<span style="display: inline-block; padding: 3px 9px; border-radius: 10px; background: #12131C; border: 1px solid rgba(255,255,255,0.12); color: #D8D9E3; ${SGF} font-size: 11px; font-weight: 700; white-space: nowrap;">${esc(txt)}</span>`;
+  const BOOSTCHIP = `<span style="display: inline-block; padding: 2px 7px; border-radius: 8px; background: #E63946; color: #F4F1EA; ${SGF} font-size: 10px; font-weight: 700; margin-right: 6px; vertical-align: 1px;">BOOST +</span>`;
+  const eyebrow = (t, sub = '') => `<div style="display: flex; align-items: baseline; gap: 10px;"><div style="${SGF} font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #F5B700; white-space: nowrap;">${t}</div><div style="font-size: 11px; color: #9296AD;">${sub}</div></div>`;
+  function rewardRow(r, del) {
+    const where = r.kind === 'global' ? 'Global' : `Ruleta ${r.wheel}`;
+    const extra = r.kind === 'global' ? 'Recompensa global de la jornada' : r.kind === 'aleatoria' ? 'Tirada aleatoria' : '';
+    const x = del !== undefined ? `<div class="clickable" onclick="rwDelete(${del})" title="Eliminar esta recompensa y repetir la tirada" style="width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(230,57,70,0.5); color: #E63946; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">✕</div>` : '';
+    return `<div style="display: flex; align-items: center; gap: 10px; background: #232640; border-radius: 10px; padding: 9px 12px;">
+        <div style="flex: 1; min-width: 0;"><div style="font-size: 14px; font-weight: 700;">${r.boost ? BOOSTCHIP : ''}${esc(r.label)}</div>${extra ? `<div style="font-size: 10px; color: #9296AD; margin-top: 2px;">${extra}</div>` : ''}</div>
+        ${wchip(where)}${r.tier >= 1 && r.tier <= 4 ? tchip(r.tier) : ''}${x}
+      </div>`;
+  }
+  const planTxt = pos => { const [a, r] = RW_PLAN[pos]; return `${a} a elegir` + (r ? ` + ${r} aleatoria${r > 1 ? 's' : ''}` : ''); };
+  function globalCard(j) {
+    const g = recGlobal(j);
+    return `<div style="${RCARD} padding: 16px 18px; display: flex; align-items: center; gap: 14px; flex: 1;">
+        <div style="width: 46px; height: 46px; border-radius: 12px; background: rgba(245,183,0,0.12); border: 1px solid rgba(245,183,0,0.4); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;">🎁</div>
+        <div>
+          <div style="font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px;">Recompensa global de la jornada · igual para los 4 equipos</div>
+          <div style="${SGF} font-size: 20px; font-weight: 700; margin-top: 2px;${g ? '' : ' color: #4A4E63;'}">${g ? esc(g) : 'Sin definir en el sheet'}</div>
+        </div>
+      </div>`;
+  }
+
+  /* ---- vista principal de la jornada ---- */
+  function renderRecompensas() {
+    const s = state.rw; const j = s.j;
+    const pills = [1, 2, 3, 4].map(k => `<div class="${k === j ? 'pill sel' : (DB.jornadas[k - 1] && DB.jornadas[k - 1].done ? 'pill' : 'pill muted')}" onclick="setRecJ(${k})">Jornada ${k}</div>`).join('');
+    const head = sub => `<div class="pagehead tight"><h1>Recompensas</h1><div class="pagesub">${sub}</div></div><div class="pillrow">${pills}</div>`;
+    const box = (title, msg) => `<div style="padding: 22px 64px 40px;"><div style="min-height: 420px; ${RCARD} display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center;"><div style="${SGF} font-size: 26px; font-weight: 700; color: #4A4E63;">${title}</div><div style="font-size: 13px; color: #9296AD; max-width: 480px;">${msg}</div></div></div>`;
+    const sub0 = 'Qué puede tocar en las ruletas y qué se ha llevado cada equipo en cada jornada';
+    if (!VOTE_URL) return head(sub0) + box('Recompensas sin conectar', 'Para usar las ruletas hay que instalar el script del Google Sheet y poner su URL en VOTE_URL de js/config.js (guía en votacion/GUIA.md).');
+    voteLoad(false);
+    if (!rec()) return head(sub0) + box(VOTE.error ? 'No se ha podido conectar con el sheet' : 'Cargando recompensas…', VOTE.error ? 'Comprueba la URL del script y que su versión es la última (la que incluye las recompensas).' : '');
+    const wheels = recWheels(j); const done = !!(DB.jornadas[j - 1] && DB.jornadas[j - 1].done); const order = voteOrder(j);
+    if (s.view === 'tirar' && wheels) return head(`Jornada ${j} — elige tu equipo y tira según tu puesto`) + rwScreen(j);
+
+    const pool = recPool(j);
+    const rules = `<div style="${RCARD} padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; flex: 2.6;">
+        <div style="font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px;">Tiradas según el puesto en la jornada · es una guía: la página avisa, pero deja tirar</div>
+        <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;">${order.map((t, i) => `
+          <div style="background: #232640; border-radius: 10px; padding: 8px 10px; display: flex; align-items: flex-start; gap: 8px;">
+            <div style="${SGF} font-size: 14px; font-weight: 700; color: ${i === 0 ? '#F5B700' : '#9296AD'};">${i + 1}º</div>${done ? logo(t, 28) : ''}
+            <div style="min-width: 0;">${done ? `<div style="${SGF} font-size: 13px; font-weight: 700;">${esc(t)}</div>` : ''}<div style="font-size: 10px; color: #9296AD; line-height: 1.3;">${RW_RULE[i + 1]}</div></div>
+          </div>`).join('')}
+        </div>
+      </div>`;
+    const tierCards = [1, 2, 3, 4].map(t => `<div style="${RCARD} border-top: 3px solid ${TCOL[t]}; padding: 16px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: center; justify-content: space-between;"><div style="${SGF} font-size: 16px; font-weight: 700;">Tier ${t}</div><div style="font-size: 11px; color: #9296AD;">${t === 1 ? 'lo mejor' : t === 4 ? 'lo peor' : ''}</div></div>
+        ${pool[t].map(x => `<div style="background: #232640; border-radius: 8px; padding: 7px 10px; font-size: 13px; font-weight: 600;">${esc(x)}</div>`).join('') || '<div style="font-size: 12px; color: #4A4E63;">Sin recompensas</div>'}
+      </div>`).join('');
+    const probs = `<div style="display: grid; grid-template-columns: 90px repeat(5, minmax(0, 1fr)); gap: 10px 8px; align-items: center;">
+        ${['', 'Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Bonus'].map(h => `<div style="font-size: 10px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">${h}</div>`).join('')}
+        ${[1, 2, 3, 4].map(w => `<div style="${SGF} font-size: 13px; font-weight: 700;">Ruleta ${w}</div>${RW_DIST[w].map((n, i) => `<div style="text-align: center;">${n ? tchip(i + 1, n * 5 + '%') : '—'}</div>`).join('')}<div style="text-align: center;">${tchip(0, '5%')}</div>`).join('')}
+      </div>`;
+    const gold = 'background: rgba(245,183,0,0.08); border: 1px solid rgba(245,183,0,0.35);';
+    const btn = (lab, fn, on = true) => `<div ${on ? `class="clickable" onclick="${fn}"` : ''} style="padding: 13px 30px; border-radius: 14px; background: ${on ? '#F5B700' : '#232640'}; color: ${on ? '#12131C' : '#4A4E63'}; ${SGF} font-size: 15px; font-weight: 700;">${lab}</div>`;
+    const cta = !done
+      ? `<div style="font-size: 30px;">🎡</div><div style="${SGF} font-size: 18px; font-weight: 700; color: #9296AD;">Jornada ${j} sin terminar</div><div style="font-size: 12px; color: #9296AD; max-width: 340px; line-height: 1.5;">Las ruletas se generan cuando se hayan jugado todos los enfrentamientos de la jornada.</div>${btn(`Disponible cuando acabe la Jornada ${j}`, '', false)}`
+      : !wheels
+        ? `<div style="font-size: 30px;">🎡</div><div style="${SGF} font-size: 18px; font-weight: 700; color: #F5B700;">Jornada ${j} terminada</div><div style="font-size: 12px; color: #D8D9E3; max-width: 340px; line-height: 1.5;">Genera las ruletas de esta jornada: se sortea qué recompensa de cada tier cae en cada casilla. Se hace una sola vez y quedan iguales para los 4 equipos. Si después cambiáis las recompensas en el sheet, solo afecta a las jornadas que aún no tengan ruletas.</div>${btn(s.busy ? 'Generando…' : s.genAsk ? '¿Seguro? Generar ahora' : 'Generar ruletas', 'rwGenerate()', !s.busy)}`
+        : `<div style="font-size: 30px;">🎡</div><div style="${SGF} font-size: 18px; font-weight: 700; color: #F5B700;">Ruletas de la Jornada ${j} listas</div><div style="font-size: 12px; color: #D8D9E3; max-width: 340px; line-height: 1.5;">Elige tu equipo, tira según tu puesto y confirma tus recompensas.</div>${btn('Tirar las ruletas', 'rwOpen()')}`;
+    const nConf = order.filter(t => recGot(j, t)).length;
+    const reparto = wheels ? `${eyebrow('Lo que se ha llevado cada equipo', `Recompensa · ruleta de la que salió · tier · han confirmado ${nConf} de ${order.length}`)}
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${order.map((t, i) => {
+        const got = recGot(j, t);
+        return `<div style="${RCARD} padding: 16px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+            <div style="${SGF} font-size: 15px; font-weight: 700; color: ${i === 0 ? '#F5B700' : '#9296AD'};">${i + 1}º</div>${logo(t, 40)}
+            <div><div style="${SGF} font-size: 16px; font-weight: 700;">${esc(t)}</div><div style="font-size: 11px; color: #9296AD;">${esc(T(t).coach)} · ${planTxt(i + 1)}</div></div>
+          </div>
+          ${got ? got.rows.map(r => rewardRow(r)).join('') : '<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">Pendiente de tirar y confirmar</div>'}
+        </div>`;
+      }).join('')}</div>` : '';
+    return head(sub0) + `<div style="padding: 22px 64px 40px; display: flex; flex-direction: column; gap: 18px;">
+      ${s.done ? `<div style="background: rgba(76,201,240,0.08); border: 1px solid rgba(76,201,240,0.35); border-radius: 12px; padding: 10px 16px; ${SGF} font-size: 13px; font-weight: 700; color: #4CC9F0;">✓ ${esc(s.done)}</div>` : ''}
+      ${s.msg ? `<div style="background: rgba(230,57,70,0.08); border: 1px solid rgba(230,57,70,0.4); border-radius: 12px; padding: 10px 16px; font-size: 13px; color: #F4F1EA;">${esc(s.msg)}</div>` : ''}
+      ${wheels ? `<div style="${gold} border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px;"><div style="font-size: 20px;">🎡</div><div><div style="${SGF} font-size: 14px; font-weight: 700; color: #F5B700;">Ruletas de la Jornada ${j} generadas · han confirmado ${nConf} de ${order.length} equipos</div><div style="font-size: 11px; color: #9296AD; margin-top: 2px;">Elige tu equipo, tira según tu puesto y confirma tus recompensas.</div></div></div>
+        <div class="clickable" onclick="rwOpen()" style="padding: 9px 18px; border-radius: 20px; background: #F5B700; color: #12131C; ${SGF} font-size: 13px; font-weight: 700; white-space: nowrap;">Tirar las ruletas</div>
+      </div>` : ''}
+      <div style="display: flex; gap: 18px;">${globalCard(j)}${rules}</div>
+      ${reparto}
+      ${eyebrow('Recompensas por tier', wheels ? `Las que entraron en las ruletas de la Jornada ${j}` : 'Lo que puede tocar en las ruletas · se edita en la hoja Recompensas del sheet')}
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${tierCards}</div>
+      ${eyebrow('Las ruletas', '4 ruletas de 20 casillas, de mejor a peor · cada casilla es un 5%')}
+      <div style="display: flex; gap: 18px; align-items: stretch;">
+        <div style="${RCARD} padding: 18px; flex: 1.2;">${probs}
+          <div style="font-size: 11px; color: #9296AD; margin-top: 12px; line-height: 1.5;"><b style="color: #D8D9E3;">Bonus:</b> no es una recompensa. Vuelves a tirar y lo siguiente que te salga se apunta como "Boost + recompensa"; cada uno decide cómo usa el boost. Si vuelve a salir bonus se tira otra vez, pero el boost no se acumula.<br><b style="color: #D8D9E3;">Tirada aleatoria:</b> una quinta ruleta decide en cuál tiras (Ruleta 1 10% · Ruleta 2 20% · Ruleta 3 30% · Ruleta 4 40%). Si te manda a una ruleta que ya tienes llena, eliges una de menor rango.<br><b style="color: #D8D9E3;">Máximos:</b> Ruleta 1, 2 tiradas para el 1º y el 2º y 1 para el 3º y el 4º. Ruleta 2, 2 tiradas para todos. Ruletas 3 y 4, sin límite.</div>
+        </div>
+        <div style="flex: 1; ${done ? gold : RCARD} border-radius: 16px; padding: 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center;">${cta}</div>
+      </div>
+    </div>`;
+  }
+
+  /* ---- pantalla de tirar ---- */
+  function rwScreen(j) {
+    const s = state.rw; const order = voteOrder(j); const me = s.team;
+    const chips = order.map((t, i) => {
+      const on = t === me; const got = recGot(j, t); const dr = on ? s.draft : draftPeek(j, t);
+      const box = on ? 'border: 2px solid #F5B700; background: rgba(245,183,0,0.10); padding: 9px 13px;' : 'border: 1px solid rgba(255,255,255,0.08); background: #232640; padding: 10px 14px;';
+      const st = on ? '<span style="color: #F5B700; font-weight: 700;">Tirando ahora</span>' : dr && dr.rows.length ? `<span style="color: #D8D9E3; font-weight: 600;">Sin confirmar</span> <span style="color: #9296AD;">· ${dr.rows.length} en este dispositivo</span>` : got ? '<span style="color: #4CC9F0; font-weight: 600;">✓ Confirmado</span>' : '<span style="color: #9296AD;">Pendiente</span>';
+      return `<div class="clickable" onclick="rwAsk('${esc(t)}')" style="flex: 1; display: flex; align-items: center; gap: 10px; border-radius: 12px; ${box}">
+        <div style="${SGF} font-size: 14px; font-weight: 700; color: ${i === 0 ? '#F5B700' : '#9296AD'};">${i + 1}º</div>${logo(t, 36)}
+        <div style="min-width: 0;"><div style="${SGF} font-size: 15px; font-weight: 700;">${esc(t)} <span style="font-family: 'Work Sans', sans-serif; font-size: 11px; font-weight: 500; color: #9296AD;">· ${esc(T(t).coach)}</span></div><div style="font-size: 11px; margin-top: 1px; white-space: nowrap;">${st}</div></div>
+      </div>`;
+    }).join('');
+    const step1 = `<div style="${RCARD} padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">${eyebrow('1 · ¿Qué equipo tira?', `En orden de clasificación de la Jornada ${j} · puede tirar cualquier equipo, en el orden que queráis`)}<div class="clickable" onclick="rwClose()" style="font-size: 12px; font-weight: 600; color: #9296AD; white-space: nowrap;">← Volver</div></div>
+      <div style="display: flex; gap: 12px;">${chips}</div>
+    </div>`;
+    let body;
+    if (!me) body = `<div style="min-height: 320px; ${RCARD} display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center;"><div style="${SGF} font-size: 22px; font-weight: 700; color: #4A4E63;">Elige tu equipo para empezar a tirar</div><div style="font-size: 13px; color: #9296AD; max-width: 480px;">Las tiradas dependen del puesto en la jornada. Tus recompensas no se apuntan en el sheet hasta que pulses "Confirmar recompensas".</div></div>`;
+    else {
+      const d = s.draft; const pos = order.indexOf(me) + 1; const { c, nc, nr } = rwCounts(d); const [pc, pr] = RW_PLAN[pos]; const lim = rwLimit(pos);
+      const tabs = ['1', '2', '3', '4', 'A'].map(w => {
+        const on = s.wheel === w; const target = d.pending && String(d.pending) === w;
+        const note = w !== 'A' && lim[w] ? ` <span style="font-weight: 500; opacity: 0.75; font-size: 11px;">${c[w]}/${lim[w]}</span>` : '';
+        return `<div class="clickable" onclick="rwTab('${w}')" style="padding: 8px 14px; border-radius: 20px; font-size: 13px; ${on ? 'background: #F5B700; color: #12131C; font-weight: 700;' : `background: #1B1D2B; border: 1px solid ${target ? '#F5B700' : 'rgba(255,255,255,0.08)'}; color: #D8D9E3; font-weight: 600;`}">${w === 'A' ? 'Aleatoria' : 'Ruleta ' + w}${note}</div>`;
+      }).join('');
+      const warns = rwWarnings(pos, d, s.wheel);
+      const last = s.last ? `<div style="width: 100%; box-sizing: border-box; border-radius: 14px; padding: 12px 16px; background: #232640; border: 1px solid ${TCOL[s.last.t]}; display: flex; align-items: center; gap: 14px;">${s.last.chip ? tchip(s.last.t, s.last.chip) : ''}<div><div style="${SGF} font-size: 18px; font-weight: 700;">${esc(s.last.big)}</div><div style="font-size: 12px; color: #9296AD; margin-top: 2px;">${esc(s.last.small)}</div></div></div>` : '';
+      const left = `<div style="${RCARD} flex: 1.25; min-width: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 14px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">${tabs}</div>
+        <div style="position: relative; width: 460px; height: 460px; max-width: 100%;">
+          <div style="position: absolute; left: 50%; top: -8px; margin-left: -13px; width: 0; height: 0; border-left: 13px solid transparent; border-right: 13px solid transparent; border-top: 26px solid #F4F1EA; z-index: 2;"></div>
+          <canvas id="rw-wheel" width="920" height="920" style="position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; transform: rotate(${s.rot}deg);"></canvas>
+          <div style="position: absolute; left: 50%; top: 50%; width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 50%; background: #12131C; border: 3px solid #F4F1EA; box-sizing: border-box; display: flex; align-items: center; justify-content: center; ${SGF} font-size: 20px; font-weight: 700; z-index: 2;">${s.wheel === 'A' ? '?' : 'R' + s.wheel}</div>
+        </div>
+        <div id="rw-spin" class="clickable" onclick="rwSpin()" style="padding: 13px 34px; border-radius: 14px; background: #F5B700; color: #12131C; ${SGF} font-size: 16px; font-weight: 700;">${s.wheel === 'A' ? 'Tirar para ver en qué ruleta' : d.boost ? 'Tirar con boost' : 'Tirar'}</div>
+        ${warns.length ? `<div style="font-size: 12px; color: #F5B700; text-align: center; max-width: 440px;"><b>Aviso:</b> ${warns.map(esc).join(' ')} Puedes tirar igualmente.</div>` : `<div style="font-size: 12px; color: #9296AD; text-align: center;">${s.wheel === 'A' ? 'Decide en qué ruleta haces tu tirada aleatoria' : d.pending ? 'Cuenta como tirada aleatoria' : d.boost ? 'Repite la tirada del bonus' : 'Cuenta como tirada a elegir'}</div>`}
+        ${last}
+      </div>`;
+      const off = nc !== pc || nr !== pr || d.pending || d.boost; const can = d.rows.length > 0 && !s.busy;
+      const cnt = (n, tot, lab, hi) => `<div style="background: #232640; border-radius: 12px; padding: 10px 12px;${hi ? ' border: 1px solid #F5B700;' : ''}"><div style="${SGF} font-size: 22px; font-weight: 700;${n > tot ? ' color: #E63946;' : hi ? ' color: #F5B700;' : ''}">${n} <span style="font-size: 13px; color: #9296AD; font-weight: 500;">de ${tot}</span></div><div style="font-size: 11px; color: #9296AD;">${lab}</div></div>`;
+      const g = recGlobal(j);
+      const right = `<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+        <div style="${RCARD} padding: 18px; display: flex; flex-direction: column; gap: 12px;">
+          ${eyebrow('2 · Tus tiradas', `${esc(me)} quedó ${pos}º: ${RW_RULE[pos]}`)}
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">${cnt(nc, pc, 'tiradas a elegir hechas', !d.pending && !d.boost && nc < pc)}${cnt(nr, pr, 'tiradas aleatorias hechas', !!d.pending || (nc >= pc && nr < pr))}</div>
+          <div style="font-size: 12px; color: #F4F1EA; font-weight: 600;">${esc(rwGuide(pos, d))}</div>
+        </div>
+        <div style="${RCARD} padding: 18px; display: flex; flex-direction: column; gap: 8px;">
+          ${eyebrow('Lo que llevas', 'Sin confirmar todavía')}
+          ${g ? rewardRow({ label: g, tier: tierOf(j, g), wheel: '', kind: 'global' }) : ''}
+          ${d.rows.map((r, i) => rewardRow(r, i)).join('')}
+          ${d.rows.length ? '' : '<div style="border: 1px dashed rgba(255,255,255,0.18); border-radius: 10px; padding: 9px 12px; color: #4A4E63; font-size: 13px;">Tu primera tirada…</div>'}
+          <div ${can ? 'class="clickable" onclick="rwConfirm()"' : ''} style="margin-top: 6px; padding: 12px; border-radius: 12px; background: ${can ? (off && !s.sure ? '#232640' : '#F5B700') : '#232640'}; color: ${can ? (off && !s.sure ? '#F4F1EA' : '#12131C') : '#4A4E63'}; border: 1px solid ${can && off && !s.sure ? '#F5B700' : 'transparent'}; text-align: center; ${SGF} font-size: 14px; font-weight: 700;">${s.busy ? 'Confirmando…' : s.sure ? 'Confirmar igualmente' : 'Confirmar recompensas'}</div>
+          <div style="font-size: 10px; color: ${s.msg ? '#E63946' : s.sure ? '#F5B700' : '#9296AD'}; text-align: center; line-height: 1.4;">${s.msg ? esc(s.msg) : s.sure ? `Tus tiradas no coinciden con las de tu puesto (${planTxt(pos)}). Pulsa otra vez para confirmar así.` : `Si ha habido un error, elimina la fila con la ✕ y repite esa tirada.<br>Al confirmar, las recompensas se apuntan en el sheet y aparecen en la ficha del equipo.${recGot(j, me) ? `<br>${esc(me)} ya había confirmado: al confirmar de nuevo se sustituyen sus recompensas.` : ''}`}</div>
+        </div>
+      </div>`;
+      body = `<div style="display: flex; gap: 24px; align-items: flex-start;">${left}${right}</div>`;
+    }
+    let modal = '';
+    if (s.ask) {
+      const t = T(s.ask); const pos = order.indexOf(s.ask) + 1;
+      modal = `<div onclick="rwCancelAsk()" style="position: fixed; inset: 0; z-index: 50; background: rgba(10,11,18,0.78); display: flex; align-items: center; justify-content: center;">
+        <div onclick="event.stopPropagation()" style="width: 460px; max-width: calc(100vw - 32px); box-sizing: border-box; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 28px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">
+          ${logo(t.sig, 72, `border: 3px solid ${t.color};`)}
+          <div style="${SGF} font-size: 22px; font-weight: 700;">¿Eres ${esc(t.sig)}?</div>
+          <div style="font-size: 13px; color: #D8D9E3; line-height: 1.5;">Vas a tirar como <b>${esc(t.name)}</b> (${esc(t.coach)}), ${pos}º de la jornada.</div>
+          <div style="font-size: 11px; color: #9296AD; line-height: 1.5; background: #232640; border-radius: 10px; padding: 10px 12px;">${RW_RULE[pos]}.${recGot(j, s.ask) ? `<br>${esc(t.sig)} ya confirmó sus recompensas: puedes revisarlas y volver a confirmar.` : ''}</div>
+          <div style="display: flex; gap: 10px; width: 100%; margin-top: 4px;">
+            <div class="clickable" onclick="rwCancelAsk()" style="flex: 1; padding: 11px; border-radius: 12px; background: #232640; color: #D8D9E3; ${SGF} font-size: 13px; font-weight: 700;">Cancelar</div>
+            <div class="clickable" onclick="rwConfirmTeam()" style="flex: 1.6; padding: 11px; border-radius: 12px; background: #F5B700; color: #12131C; ${SGF} font-size: 13px; font-weight: 700;">Confirmo que soy ${esc(t.sig)}</div>
+          </div>
+        </div>
+      </div>`;
+    }
+    return `<div style="padding: 22px 64px 40px; display: flex; flex-direction: column; gap: 16px;">${step1}${body}</div>${modal}`;
+  }
+  // Dibuja la ruleta en el canvas (se llama después de pintar la página)
+  function rwDraw() {
+    const cv = document.getElementById('rw-wheel'); if (!cv) return; const s = state.rw;
+    const slots = s.wheel === 'A' ? RAND_SLOTS : (recWheels(s.j) || {})[s.wheel]; if (!slots) return;
+    const ctx = cv.getContext('2d'); const W = cv.width, c = W / 2, R = c - 6; ctx.clearRect(0, 0, W, W);
+    slots.forEach((sl, i) => {
+      const a0 = (i * 18 - 90) * Math.PI / 180, a1 = ((i + 1) * 18 - 90) * Math.PI / 180; const t = s.wheel === 'A' ? sl.tier : sl.tier;
+      ctx.beginPath(); ctx.moveTo(c, c); ctx.arc(c, c, R, a0, a1); ctx.closePath(); ctx.fillStyle = TCOL[t] || TCOL[4]; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#12131C'; ctx.stroke();
+      ctx.save(); ctx.translate(c, c); ctx.rotate((a0 + a1) / 2); ctx.fillStyle = TINK[t] || '#F4F1EA';
+      let size = t === 0 ? 30 : 25; ctx.font = `${t === 0 ? 700 : 600} ${size}px 'Space Grotesk', sans-serif`;
+      while (size > 15 && ctx.measureText(sl.label).width > R - 110) { size--; ctx.font = `600 ${size}px 'Space Grotesk', sans-serif`; }
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(sl.label, R - 16, 1); ctx.restore();
+    });
+    ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.lineWidth = 6; ctx.strokeStyle = '#F4F1EA'; ctx.stroke();
+  }
+  // Bloque "Recompensas" de la ficha de un equipo: lo confirmado en cada jornada, con ruleta y tier
+  function teamRewards(sig) {
+    if (!VOTE_URL) return '';
+    voteLoad(false);
+    if (!rec()) return '';
+    const cols = [1, 2, 3, 4].map(j => {
+      const got = recGot(j, sig); const done = !!(DB.jornadas[j - 1] && DB.jornadas[j - 1].done); const pos = voteOrder(j).indexOf(sig) + 1;
+      return `<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;"><div style="${SGF} font-size: 14px; font-weight: 700;">Jornada ${j}</div>${got ? `<div style="font-size: 11px; color: #9296AD; white-space: nowrap;">${pos}º · ${planTxt(pos)}</div>` : ''}</div>
+        ${got ? got.rows.map(r => rewardRow(r)).join('') : `<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">${done ? 'Pendiente de tirar las ruletas' : 'Jornada sin terminar'}</div>`}
+      </div>`;
+    }).join('');
+    return `<div style="margin: 0 64px 40px; ${RCARD} padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between;"><div style="${SGF} font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase;">Recompensas</div><div style="font-size: 11px; color: #9296AD;">Recompensa · ruleta de la que salió · tier</div></div>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; align-items: start;">${cols}</div>
     </div>`;
   }
 
