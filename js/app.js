@@ -1005,8 +1005,8 @@
       const r = await fetch(VOTE_URL + (VOTE_URL.includes('?') ? '&' : '?') + 't=' + Date.now());
       const d = await r.json();
       if (!d || !d.ok) throw new Error((d && d.error) || 'respuesta no válida');
-      VOTE.data = d.scopes || {}; VOTE.rec = d.rec || null; VOTE.error = '';
-    } catch (err) { VOTE.error = 'No se ha podido conectar con la votación'; }
+      VOTE.data = d.scopes || {}; VOTE.rec = d.rec || null; VOTE.error = ''; VOTE.detail = '';
+    } catch (err) { VOTE.error = 'No se ha podido conectar con la votación'; VOTE.detail = String((err && err.message) || ''); }
     VOTE.loading = false;
     if (['insignias', 'recompensas', 'equipos'].includes(state.tab) && !state.rw.spinning) render();
   }
@@ -1506,7 +1506,12 @@
     const sub0 = 'Qué puede tocar en las ruletas y qué se ha llevado cada equipo en cada jornada';
     if (!VOTE_URL) return head(sub0) + box('Recompensas sin conectar', 'Para usar las ruletas hay que instalar el script del Google Sheet y poner su URL en VOTE_URL de js/config.js (guía en votacion/GUIA.md).');
     voteLoad(false);
-    if (!rec()) return head(sub0) + box(VOTE.error ? 'No se ha podido conectar con el sheet' : 'Cargando recompensas…', VOTE.error ? 'Comprueba la URL del script y que su versión es la última (la que incluye las recompensas).' : '');
+    if (!rec()) {
+      // El script ha respondido pero sin datos de recompensas: está publicada una versión antigua (solo votación)
+      if (VOTE.data && !VOTE.error) return head(sub0) + box('Falta actualizar el script del sheet', 'La web ha conectado con el script, pero la versión publicada todavía no incluye las recompensas. En Apps Script: pega el Codigo.gs nuevo, guarda, ejecuta "configurar" y después Implementar → Gestionar implementaciones → lápiz → Versión: Nueva versión → Implementar.');
+      if (VOTE.error) return head(sub0) + box('No se ha podido conectar con el sheet', 'Comprueba la URL del script (VOTE_URL en js/config.js) y que su acceso es "Cualquier usuario".' + (VOTE.detail ? ` Detalle: ${esc(VOTE.detail)}` : ''));
+      return head(sub0) + box('Cargando recompensas…', 'Puede tardar unos segundos.');
+    }
     const wheels = recWheels(j); const done = !!(DB.jornadas[j - 1] && DB.jornadas[j - 1].done); const order = voteOrder(j);
     if (s.view === 'tirar' && wheels) return head(`Jornada ${j} — elige tu equipo y tira según tu puesto`) + rwScreen(j);
 
