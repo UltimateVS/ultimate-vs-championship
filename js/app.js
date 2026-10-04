@@ -1690,14 +1690,23 @@
     let html = `<div style="font-size: 15px; font-weight: 700; font-family: 'Space Grotesk', sans-serif; color: #F4F1EA;">Reglamento ${which}</div>`;
     let bullets = []; let firstSec = true;
     const flush = () => { if (bullets.length) { html += `<div style="display: flex; flex-direction: column; gap: 6px;">${bullets.join('')}</div>`; bullets = []; } };
+    let table = [];   // filas seguidas de tipo "Tabla" con celdas separadas por "|": la primera es la cabecera
+    const flushTable = () => {
+      if (!table.length) return;
+      const n = Math.max(...table.map(r => r.length)); const cols = `grid-template-columns: minmax(0, 1.25fr) repeat(${n - 1}, minmax(0, 1fr));`;
+      html += `<div class="rules-table">${table.map((r, i) => `<div class="${i ? 'rules-table-row' : 'rules-table-head'}" style="${cols} gap: 10px;">${Array.from({ length: n }, (_, k) => `<div style="${k ? 'text-align: center;' : (i ? 'font-weight: 600;' : '')}">${esc(r[k] || '')}</div>`).join('')}</div>`).join('')}</div>`;
+      table = [];
+    };
     for (const r of list) {
+      if (r.type === 'Tabla' && r.text.includes('|')) { flush(); table.push(r.text.split('|').map(x => x.trim())); continue; }
+      flushTable();
       if (r.type === 'Regla') { bullets.push(`<div class="rule"><span>•</span>${esc(r.text)}</div>`); continue; }
       flush();
       if (r.type === 'Sección') { html += `<div style="font-size: 13px; font-weight: 700; color: #F5B700;${firstSec ? '' : ' margin-top: 4px;'}">${esc(r.text)}</div>`; firstSec = false; }
       else if (r.type === 'Subsección') html += `<div style="font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: #9296AD; font-weight: 600; margin-top: 2px;">${esc(r.text)}</div>`;
       else if (r.type === 'Tabla') html += /punto/i.test(r.text) ? pointsTable() : levelsTable();
     }
-    flush();
+    flush(); flushTable();
     return html;
   }
   function levelsTable() {
@@ -1720,27 +1729,28 @@
         ${g.quote ? `<div style="font-size: 12px;">"${esc(g.quote.replace(/^["“«]|["”»]$/g, ''))}"</div>` : ''}
       </div>`).join('');
     const galBody = DB.gallery.length
-      ? `<div class="thin-scroll" style="max-height: 420px; overflow-y: auto; padding-right: 8px;"><div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;">${gal}</div></div>`
+      ? `<div class="thin-scroll" style="flex: 1; min-height: 0; overflow-y: auto; padding-right: 8px;"><div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;">${gal}</div></div>`
       : `<div style="font-size: 13px; color: #4A4E63; padding: 20px 0;">Todavía no hay fotos en la galería</div>`;
     return `
-    <div style="padding: 22px 64px; display: flex; gap: 28px; align-items: flex-start;">
-      <div style="flex: 1; min-width: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 14px;">
-        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700;">${esc(DB.historia.title)}</div>
-        ${paras}
+    <div style="padding: 22px 64px 40px; display: flex; gap: 28px; align-items: stretch; height: 900px; box-sizing: content-box;">
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px; min-height: 0;">
+        <div style="flex-shrink: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 14px;">
+          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700;">${esc(DB.historia.title)}</div>
+          ${paras}
+        </div>
+        <!-- Galería debajo del texto: 2 fotos por fila, el resto con scroll -->
+        <div style="${state.galOpen ? 'flex: 1; min-height: 0;' : 'flex-shrink: 0;'} background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 22px 28px; display: flex; flex-direction: column; gap: 14px;">
+          <div onclick="toggleGal()" style="display: flex; align-items: center; gap: 10px; cursor: pointer; flex-shrink: 0;">
+            <div style="font-size: 14px; color: #F5B700; font-weight: 700;">${state.galOpen ? '▾' : '▸'}</div>
+            <div style="font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700;">Galería</div>
+            <div style="font-size: 12px; color: #9296AD;">— ${state.galOpen ? 'pulsa una foto para verla completa' : 'toca para desplegar'}</div>
+          </div>
+          ${state.galOpen ? galBody : ''}
+        </div>
       </div>
-      <div style="flex: 1; min-width: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 18px; height: 900px;">
+      <div style="flex: 1; min-width: 0; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 18px; min-height: 0;">
         <div style="display: flex; gap: 8px; flex-shrink: 0;">${pill('Nuzlocke', 'Reglas Nuzlocke')}${pill('VS', 'Reglas VS')}</div>
         <div class="thin-scroll rules-scroll" style="flex: 1; min-height: 0; overflow-y: auto; padding-right: 10px; display: flex; flex-direction: column; gap: 14px;">${rulesHtml(state.rules)}</div>
-      </div>
-    </div>
-    <div style="padding: 0 64px 40px;">
-      <div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px;">
-        <div onclick="toggleGal()" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <div style="font-size: 14px; color: #F5B700; font-weight: 700;">${state.galOpen ? '▾' : '▸'}</div>
-          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 700;">Galería</div>
-          <div style="font-size: 12px; color: #9296AD;">— ${state.galOpen ? 'pulsa una foto para verla completa' : 'toca para desplegar'}</div>
-        </div>
-        ${state.galOpen ? galBody : ''}
       </div>
     </div>`;
   }
