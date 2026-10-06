@@ -43,7 +43,7 @@
   }
 
   /* ---------------- navegación (hash) ---------------- */
-  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '',
+  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '', pg: null,
     rw: { j: 1, view: null, team: null, ask: null, wheel: '1', rot: 0, spinning: false, draft: null, last: null, msg: '', done: '', busy: false, sure: false, genAsk: false } };
 
   function route() {
@@ -56,7 +56,8 @@
       state.jor = e.j; state.enf = arg;
       if (DB.jornadas[e.j - 1].enfs.indexOf(e) >= 2) state.sideExpanded = true;
     }
-    state.voteView = null; state.voteAsk = null; state.voteDone = '';   // la votación se cierra al cambiar de pestaña
+    state.voteView = null; state.voteAsk = null; state.voteDone = '';
+    state.pgT = null; state.pg = null;   // el progreso se abre siempre en el tramo actual   // la votación se cierra al cambiar de pestaña
     if (state.tab === 'insignias') state.ins = defaultIns();
     if (state.tab === 'recompensas' && !state.rw.spinning) Object.assign(state.rw, { j: recDefaultJ(), anexo: null, view: null, team: null, ask: null, msg: '', done: '', genAsk: false, sure: false });
     render();
@@ -168,28 +169,144 @@
       </div>`;
     }).join('');
 
+    // Con el script conectado: Clasificación y Último resultado se ajustan a su contenido y debajo va el progreso hacia el siguiente VS
+    const prog = progressCard();
     return `
     <div style="padding: 36px 64px 24px; display: flex; flex-direction: column; gap: 14px;">${hero}</div>
-    <div style="padding: 0 64px 44px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 550px; gap: 24px;">
-      <div class="card" style="padding: 22px; display: flex; flex-direction: column; gap: 12px;">
+    <div style="padding: 0 64px 44px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); ${prog ? 'grid-template-rows: auto auto; align-items: start;' : 'grid-auto-rows: 550px;'} gap: 24px;">
+      <div class="card" style="padding: 22px; display: flex; flex-direction: column; gap: 12px;${prog ? ' align-self: stretch;' : ''}">
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700;">Clasificación</div>
         ${stand}
         <a onclick="go('clasificacion')" style="font-size: 13px; font-weight: 600; margin-top: 2px;">Ver clasificación completa →</a>
       </div>
-      <div class="card" style="padding: 22px; display: flex; flex-direction: column; gap: 14px;">
+      <div class="card" style="padding: 22px; display: flex; flex-direction: column; gap: 14px;${prog ? ' align-self: stretch;' : ''}">
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700;">Último resultado</div>
         ${last}
       </div>
-      <div class="card" style="padding: 22px; display: flex; flex-direction: column; gap: 12px; min-height: 0;">
+      ${prog}
+      <div class="card" style="${prog ? 'grid-column: 3; grid-row: 1 / span 2; align-self: stretch; position: relative; min-height: 520px;' : 'padding: 22px; display: flex; flex-direction: column; gap: 12px; min-height: 0;'}">
+        ${prog ? '<div style="position: absolute; inset: 0; padding: 22px; display: flex; flex-direction: column; gap: 12px;">' : ''}
         <div style="display: flex; align-items: center; justify-content: space-between;">
           <div style="font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700;">Calendario de jornadas</div>
           <a onclick="go('jornadas')" style="font-size: 12px; font-weight: 600;">Ver todo →</a>
         </div>
         <div class="cal-scroll" style="flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; display: flex; flex-direction: column; gap: 16px;">${cal}</div>
+        ${prog ? '</div>' : ''}
+      </div>
+    </div>${progressModal()}`;
+  }
+  window.toggleLast = () => { state.lastReveal = !state.lastReveal; render(); };
+
+  /* ---------- Progreso hacia el siguiente VS: nivel de cada jugador y capturas del tramo (lo rellena cada uno desde la web) ---------- */
+  const TRAMO = { 1: 'hasta el 1er VS', 2: 'entre el 1er y el 2º VS', 3: 'entre el 2º y el 3er VS', 4: 'entre el 3er y el 4º VS' };
+  const tramoNow = () => { for (let j = 1; j <= 4; j++) if (!(DB.jornadas[j - 1] && DB.jornadas[j - 1].done)) return j; return 0; };
+  const progOf = (t, sig) => { const p = VOTE.prog && VOTE.prog[String(t)]; return p && p[sig] ? p[sig] : null; };
+  // Nivel de un jugador: el apuntado en este tramo o, si aún no lo ha tocado, el último que apuntó en tramos anteriores
+  function levelOf(t, sig) { for (let k = t; k >= 1; k--) { const p = progOf(k, sig); if (p && p.level) return p.level; } return 0; }
+  // Tramo que se está viendo: siempre se abre en el actual; los anteriores y posteriores son de consulta
+  const pgHas = v => v !== undefined && v !== null && v !== '';
+  function pgSel() { const now = tramoNow(); const sel = state.pgT || now || 4; return { now, sel, kind: !now || sel < now ? 'past' : sel > now ? 'next' : 'now' }; }
+  function progressCard() {
+    if (!VOTE_URL) return '';
+    voteLoad(false);
+    const { now, sel, kind } = pgSel();
+    const SG = "font-family: 'Space Grotesk', sans-serif;"; const target = DB.levels[sel] || 0;
+    const tag = { now: ['Actual', 'background: rgba(245,183,0,0.14); color: #F5B700;'], past: ['Cerrado', 'background: #232640; color: #9296AD;'], next: ['Próximo', 'background: rgba(76,201,240,0.12); color: #4CC9F0;'] }[kind];
+    const pills = `<div style="display: flex; gap: 5px;">${[1, 2, 3, 4].map(j => `<div class="clickable" onclick="pgTramo(${j})" title="${j === now ? 'Tramo actual' : j < now || !now ? 'Tramo cerrado' : 'Tramo siguiente'}" style="padding: 5px 11px; border-radius: 14px; font-size: 11px; font-weight: 700; white-space: nowrap; ${j === sel ? 'background: #F5B700; color: #12131C;' : 'background: #232640; color: #9296AD;'}">J${j}${j === now ? `<span style="width: 5px; height: 5px; border-radius: 50%; background: ${j === sel ? '#12131C' : '#F5B700'}; display: inline-block; margin-left: 5px; vertical-align: middle;"></span>` : ''}</div>`).join('')}</div>`;
+    const wrap = inner => `<div class="card" style="grid-column: 1 / span 2; grid-row: 2; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">${inner}</div>`;
+    const head = right => `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div><div style="${SG} font-size: 17px; font-weight: 700;">Camino a la Jornada ${sel}<span style="font-family: 'Work Sans', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; padding: 3px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; ${tag[1]}">${tag[0]}</span></div><div style="font-size: 12px; color: #9296AD; margin-top: 2px;">Nivel objetivo <b style="color: #F5B700;">${target || '—'}</b> · capturas del tramo ${TRAMO[sel]}</div></div>
+        <div style="display: flex; align-items: center; gap: 12px;">${pills}${right}</div></div>`;
+    if (!VOTE.data) return wrap(head('') + `<div style="font-size: 13px; color: #9296AD; padding: 18px 0;">${VOTE.error ? 'No se ha podido conectar con el sheet para leer el progreso.' : 'Cargando progreso…'}</div>`);
+    if (!VOTE.prog) return wrap(head('') + '<div style="font-size: 13px; color: #9296AD; padding: 18px 0;">Falta actualizar el script del sheet para usar el progreso: pega el Codigo.gs nuevo, ejecuta "configurar" y publica una versión nueva.</div>');
+    const data = DB.ranking.map(r => ({ sig: r.sig, lv: kind === 'past' ? target : levelOf(kind === 'next' ? now : sel, r.sig), cap: kind === 'next' ? '' : (progOf(sel, r.sig) || {}).caps }));
+    const caps = data.filter(d => pgHas(d.cap)).map(d => +d.cap);
+    const hi = caps.length ? Math.max(...caps) : 0, lo = caps.length ? Math.min(...caps) : 0;
+    const rows = data.map(d => {
+      const ok = kind === 'past' || (target && d.lv >= target); const pct = kind === 'past' ? 100 : target ? Math.min(100, Math.round(d.lv / target * 100)) : 0; const hasCap = pgHas(d.cap);
+      const low = hasCap && hi - d.cap >= 2;
+      const lvTxt = kind === 'past' ? `<span style="${SG} font-size: 13px; font-weight: 700; color: #4CC9F0;">✓${target ? ' Nv. ' + target : ' Jugada'}</span>`
+        : !d.lv ? '<span style="font-size: 12px; color: #4A4E63;">Sin apuntar</span>'
+        : ok ? `<span style="${SG} font-size: 13px; font-weight: 700; color: #4CC9F0;">✓ Nv. ${d.lv}</span>`
+        : `<span style="${SG} font-size: 14px; font-weight: 700;">Nv. ${d.lv}</span> <span style="font-size: 11px; color: #9296AD;">/ ${target}</span>`;
+      const capTxt = hasCap ? `${kind === 'past' ? '<span style="font-size: 10px; margin-right: 4px;">🔒</span>' : ''}<span style="${SG} font-size: 14px; font-weight: 700; color: ${low ? '#E63946' : '#F4F1EA'};">${d.cap}</span> <span style="font-size: 11px; color: #9296AD;">captura${+d.cap === 1 ? '' : 's'}</span>`
+        : `<span style="font-size: 12px; color: #4A4E63;">${kind === 'past' ? 'Sin apuntar' : '— capturas'}</span>`;
+      return `<div style="display: grid; grid-template-columns: 150px minmax(0, 1fr) 92px 120px; align-items: center; gap: 16px;">
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">${logo(d.sig, 30, `border: 2px solid ${T(d.sig).color};`)}<div style="min-width: 0;"><div style="${SG} font-size: 14px; font-weight: 700;">${esc(d.sig)}</div><div style="font-size: 10px; color: #9296AD;">${esc(T(d.sig).coach)}</div></div></div>
+          <div style="height: 10px; border-radius: 5px; background: #232640; overflow: hidden;"><div style="width: ${pct}%; height: 100%; border-radius: 5px; background: ${ok ? '#4CC9F0' : '#F5B700'};"></div></div>
+          <div style="text-align: right; white-space: nowrap;">${lvTxt}</div>
+          <div style="text-align: right; white-space: nowrap;">${capTxt}</div>
+        </div>`;
+    }).join('');
+    const ready = data.filter(d => target && d.lv >= target).length;
+    const missing = data.filter(d => !pgHas(d.cap)).length;
+    const lows = data.filter(d => pgHas(d.cap) && hi - d.cap >= 2).map(d => `${d.sig} va ${hi - d.cap} por debajo`);
+    const capSum = !caps.length ? 'Capturas del tramo sin apuntar' : hi === lo ? `Capturas del tramo: ${hi} ${missing ? 'todos los que han apuntado' : 'cada uno'}` : `Capturas del tramo: entre <b style="color: #F4F1EA;">${lo}</b> y <b style="color: #F4F1EA;">${hi}</b>${lows.length ? ` · <span style="color: #E63946; font-weight: 600;">${esc(lows.join(', '))}</span>` : ''}`;
+    const btn = txt => `<div class="clickable" onclick="pgOpen()" style="padding: 8px 16px; border-radius: 20px; background: rgba(245,183,0,0.12); border: 1px solid #F5B700; color: #F5B700; font-size: 12px; font-weight: 700; white-space: nowrap;">${txt}</div>`;
+    const ghost = txt => `<div style="padding: 8px 14px; border-radius: 20px; background: #232640; color: #9296AD; font-size: 12px; font-weight: 600; white-space: nowrap;">${txt}</div>`;
+    const right = kind === 'now' ? btn('Actualizar mi progreso') : kind === 'past' ? (missing ? btn('Apuntar mis capturas') : ghost('🔒 Tramo cerrado')) : ghost(`Se abre al terminar la Jornada ${sel - 1}`);
+    const footL = kind === 'now' ? `<b style="color: #4CC9F0;">${ready} de ${data.length}</b> ${ready === 1 ? 'ha' : 'han'} llegado al nivel ${target}`
+      : kind === 'past' ? `🔒 Tramo cerrado · la Jornada ${sel} ya se ha jugado` : `Nivel actual de cada jugador frente al nivel de la Jornada ${sel}`;
+    const footR = kind === 'now' ? capSum : kind === 'next' ? 'Las capturas de este tramo aún no se pueden apuntar'
+      : missing ? 'Quien no apuntó sus capturas puede hacerlo <b style="color: #F4F1EA;">una vez</b>; después queda bloqueado' : capSum;
+    return wrap(head(right) + `<div style="display: flex; flex-direction: column; gap: 12px;">${rows}</div>
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 12px; color: #9296AD;">
+        <div>${footL}</div><div>${footR}</div>
+      </div>`);
+  }
+  const pgClamp = (v, a, b) => Math.max(a, Math.min(b, Math.round(+v) || 0));
+  const pgLocked = (t, sig) => pgHas((progOf(t, sig) || {}).caps);   // en un tramo cerrado, quien ya tiene capturas no puede tocarlas
+  window.pgTramo = j => { state.pgT = j; render(); };
+  window.pgOpen = () => { const s = pgSel(); if (s.kind === 'next') return; state.pg = { t: s.sel, closed: s.kind === 'past', team: null, level: 1, caps: 0, busy: false, msg: '' }; render(); };
+  window.pgClose = () => { state.pg = null; render(); };
+  window.pgTeam = sig => { const g = state.pg; if (!g || (g.closed && pgLocked(g.t, sig))) return; const p = progOf(g.t, sig); Object.assign(g, { team: sig, level: levelOf(g.t, sig) || 1, caps: p && pgHas(p.caps) ? +p.caps : 0, msg: '' }); render(); };
+  window.pgSet = (k, v) => { state.pg[k] = k === 'level' ? pgClamp(v, 1, 100) : pgClamp(v, 0, 99); render(); };
+  window.pgStep = (k, d) => window.pgSet(k, state.pg[k] + d);
+  window.pgSave = async () => {
+    const g = state.pg; if (!g || !g.team || g.busy) return;
+    g.busy = true; g.msg = ''; render();
+    try {
+      const body = g.closed ? { action: 'progreso', scope: String(g.t), team: g.team, caps: g.caps, closed: true } : { action: 'progreso', scope: String(g.t), team: g.team, level: g.level, caps: g.caps };
+      const r = await fetch(VOTE_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+      const d = await r.json(); if (!d || !d.ok) throw new Error((d && d.error) || 'El sheet no ha aceptado el envío');
+      state.pg = null; await voteLoad(true); render();
+    } catch (err) { g.busy = false; g.msg = 'No se ha podido guardar: ' + (err.message || 'error de conexión'); render(); }
+  };
+  function progressModal() {
+    const g = state.pg; if (!g) return '';
+    const SG = "font-family: 'Space Grotesk', sans-serif;"; const t = g.t; const target = DB.levels[t] || 0;
+    const chip = sig => { const lock = g.closed && pgLocked(t, sig);
+      return `<div ${lock ? '' : `class="clickable" onclick="pgTeam('${esc(sig)}')"`} style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 6px; border-radius: 12px; ${lock ? 'opacity: 0.35; ' : ''}${g.team === sig ? 'border: 2px solid #F5B700; background: rgba(245,183,0,0.10);' : 'border: 1px solid rgba(255,255,255,0.08); background: #232640;'}">${logo(sig, 36)}<div style="${SG} font-size: 13px; font-weight: 700;">${esc(sig)}</div><div style="font-size: 10px; color: #9296AD;">${lock ? '🔒 Ya apuntado' : esc(T(sig).coach)}</div></div>`; };
+    const sq = 'width: 38px; height: 44px; border-radius: 10px; background: #232640; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; color: #D8D9E3; user-select: none;';
+    const field = (k, lab, hint) => `<div style="flex: 1; min-width: 0;${g.team ? '' : ' opacity: 0.35; pointer-events: none;'}"><div style="font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">${lab}</div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div class="clickable" onclick="pgStep('${k}', -1)" style="${sq}">−</div>
+          <input type="number" value="${g[k]}" onchange="pgSet('${k}', this.value)" style="flex: 1; min-width: 0; height: 44px; box-sizing: border-box; border-radius: 10px; background: #12131C; border: 1px solid rgba(255,255,255,0.15); color: #F4F1EA; text-align: center; ${SG} font-size: 20px; font-weight: 700;">
+          <div class="clickable" onclick="pgStep('${k}', 1)" style="${sq}">+</div>
+        </div>
+        <div style="font-size: 10px; color: #9296AD; margin-top: 5px;">${hint}</div></div>`;
+    const can = g.team && !g.busy;
+    const fields = g.closed ? field('caps', 'Capturas en ese tramo', `Pokémon capturados ${TRAMO[t]}`)
+      : field('level', 'Nivel de tu equipo', `Puedes ir subiéndolo poco a poco o ponerlo cuando llegues al ${target || 'objetivo'}`) + field('caps', 'Capturas en este tramo', `Pokémon capturados ${TRAMO[t]}`);
+    const note = g.closed ? 'Tramo cerrado: solo se puede apuntar una vez. Después queda bloqueado y solo se corrige a mano en el sheet.' : 'Se guarda en el sheet y lo ven todos. Puedes cambiarlo las veces que quieras.';
+    return `<div onclick="pgClose()" style="position: fixed; inset: 0; z-index: 50; background: rgba(10,11,18,0.78); display: flex; align-items: center; justify-content: center; padding: 16px;">
+      <div onclick="event.stopPropagation()" style="width: 520px; max-width: 100%; box-sizing: border-box; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 26px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between;">
+          <div><div style="${SG} font-size: 20px; font-weight: 700;">${g.closed ? 'Apuntar mis capturas' : 'Actualizar mi progreso'}</div><div style="font-size: 12px; color: #9296AD; margin-top: 2px;">Camino a la Jornada ${t} · ${g.closed ? 'tramo cerrado' : 'nivel objetivo ' + (target || '—')}</div></div>
+          <div class="clickable" onclick="pgClose()" style="width: 30px; height: 30px; border-radius: 50%; background: #232640; color: #D8D9E3; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700;">✕</div>
+        </div>
+        <div><div style="font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">¿Qué equipo eres?</div><div style="display: flex; gap: 8px;">${DB.teamOrder.map(chip).join('')}</div></div>
+        <div style="display: flex; gap: 16px;">${fields}</div>
+        <div ${can ? 'class="clickable" onclick="pgSave()"' : ''} style="padding: 12px; border-radius: 12px; background: ${can ? '#F5B700' : '#232640'}; color: ${can ? '#12131C' : '#4A4E63'}; text-align: center; ${SG} font-size: 14px; font-weight: 700;">${g.busy ? 'Guardando…' : g.team ? `Guardar ${g.closed ? 'capturas' : 'progreso'} de ${esc(g.team)}` : 'Elige tu equipo'}</div>
+        <div style="font-size: 10px; color: ${g.msg ? '#E63946' : '#9296AD'}; text-align: center;">${g.msg ? esc(g.msg) : note}</div>
       </div>
     </div>`;
   }
-  window.toggleLast = () => { state.lastReveal = !state.lastReveal; render(); };
+  function teamCaptures(sig) {
+    if (!VOTE_URL || !VOTE.prog) return '';
+    const line = t => { const p = progOf(t, sig); const has = p && p.caps !== '' && p.caps != null; return `<div style="display: flex; justify-content: space-between; font-size: 13px; gap: 8px;"><span style="color: #9296AD;">${TRAMO[t].charAt(0).toUpperCase() + TRAMO[t].slice(1)}</span><span style="font-weight: 600;${has ? '' : ' color: #4A4E63;'}">${has ? p.caps : '—'}</span></div>`; };
+    return `<div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase; margin-top: 10px;">Capturas</div>${[1, 2, 3, 4].map(line).join('')}`;
+  }
   function calStatus(e) {
     if (e.state === 'jugado') return { txt: '✓ ' + (e.date ? fmtDate(e.date, e.hasTime) : 'Jugado'), color: '#9296AD', w: 600 };
     if (e.state === 'curso') return { txt: 'En curso', color: '#F5B700', w: 600 };
@@ -284,6 +401,7 @@
       <div style="width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;">
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase;">Balance</div>
         ${bal('Enfrentamientos ganados', s.ewon)}${bal('Enfrentamientos perdidos', s.elost)}${bal('Combates ganados', s.won)}${bal('Combates perdidos', s.lost)}${bal('KOs a favor', s.made)}${bal('KOs en contra', s.recv)}
+        ${teamCaptures(sig)}
       </div>
     </div>${rw}`;
   }
@@ -989,7 +1107,7 @@
      (CFG.VOTE_URL). Si VOTE_URL está vacío, la web funciona como antes.
      ===================================================================== */
   const VOTE_URL = String(CFG.VOTE_URL || '').trim();
-  const VOTE = { data: null, rec: null, loading: false, error: '', at: 0 };
+  const VOTE = { data: null, rec: null, prog: null, loading: false, error: '', at: 0 };
   const AWK = ['mvp', 'asist', 'dpoy', 'sexto', 'first', 'second'];
   const AWN = { mvp: 3, asist: 3, dpoy: 3, sexto: 3, first: 6, second: 6 };
   const sk = j => j === 'T' ? 'T' : String(j);
@@ -1005,10 +1123,10 @@
       const r = await fetch(VOTE_URL + (VOTE_URL.includes('?') ? '&' : '?') + 't=' + Date.now());
       const d = await r.json();
       if (!d || !d.ok) throw new Error((d && d.error) || 'respuesta no válida');
-      VOTE.data = d.scopes || {}; VOTE.rec = d.rec || null; VOTE.error = ''; VOTE.detail = '';
+      VOTE.data = d.scopes || {}; VOTE.rec = d.rec || null; VOTE.prog = d.prog || null; VOTE.error = ''; VOTE.detail = '';
     } catch (err) { VOTE.error = 'No se ha podido conectar con la votación'; VOTE.detail = String((err && err.message) || ''); }
     VOTE.loading = false;
-    if (['insignias', 'recompensas', 'equipos'].includes(state.tab) && !state.rw.spinning) render();
+    if (['inicio', 'insignias', 'recompensas', 'equipos'].includes(state.tab) && !state.rw.spinning) render();
   }
 
   // Orden de los equipos: clasificación de la jornada (o general en el Total)
