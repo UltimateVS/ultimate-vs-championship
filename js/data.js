@@ -28,7 +28,8 @@
   async function fetchTab(name) {
     let url;
     if (CFG.DATA_DIR) url = `${CFG.DATA_DIR}/${encodeURIComponent(name)}.csv?t=${Date.now()}`;
-    else url = `https://docs.google.com/spreadsheets/d/${CFG.SHEET_ID}/gviz/tq?tqx=out:csv&headers=0&sheet=${encodeURIComponent(name)}&t=${Date.now()}`;
+    // range=A:Z obliga a Google a devolver todas las columnas (en Enfrentamientos la W, Habilidad, va después de Indicaciones)
+    else url = `https://docs.google.com/spreadsheets/d/${CFG.SHEET_ID}/gviz/tq?tqx=out:csv&headers=0&sheet=${encodeURIComponent(name)}${name === 'Enfrentamientos' ? '&range=A:Z' : ''}&t=${Date.now()}`;
     const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) throw new Error(`No se pudo leer la pestaña "${name}" (HTTP ${r.status})`);
     const txt = await r.text();
@@ -122,7 +123,9 @@
       DB.enfs.push(e); DB.enfById[id] = e;
     }
 
-    // Enfrentamientos (plantillas de combate)
+    // Enfrentamientos (plantillas de combate). La columna de la habilidad se busca por su cabecera "Habilidad" (por defecto la W)
+    let ABIL = 22;
+    for (const r of raw.Enfrentamientos.slice(0, 10)) { const i = r.findIndex(c => S(c).toLowerCase() === 'habilidad'); if (i >= 0) { ABIL = i; break; } }
     for (const r of raw.Enfrentamientos) {
       const id = S(r[0]); const rol = S(r[6]);
       if (!ENF_ID.test(id) || !['Titular', 'Baneado', 'Suplente'].includes(rol)) continue;
@@ -137,7 +140,7 @@
         team: S(r[8]) || sideTeams[0], poke, nick: S(r[10]), gender: S(r[11]),
         level: N(r[12]) || DB.levels[e.j] || '', item: S(r[13]),
         moves: [S(r[14]), S(r[15]), S(r[16]), S(r[17])].filter(Boolean),
-        ability: S(r[22]),   // columna W (Habilidad), solo si se ha visto en el combate
+        ability: S(r[ABIL]),   // columna W (Habilidad), solo si se ha visto en el combate
         ko, kills, assists
       };
       const side = cb.sides[lado];
