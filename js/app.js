@@ -206,6 +206,16 @@
   // Tramo que se está viendo: siempre se abre en el actual; los anteriores y posteriores son de consulta
   const pgHas = v => v !== undefined && v !== null && v !== '';
   function pgSel() { const now = tramoNow(); const sel = state.pgT || now || 4; return { now, sel, kind: !now || sel < now ? 'past' : sel > now ? 'next' : 'now' }; }
+  // Media orientativa de un tramo: total acumulado de cada jugador hasta ese tramo incluido
+  // (capturas de todos los tramos + huevos de los tramos anteriores), entre los que ya han apuntado capturas en ese tramo.
+  function pgStats(t) {
+    const prev = sig => { let n = 0; for (let k = 1; k < t; k++) { const p = progOf(k, sig) || {}; n += (+p.caps || 0) + (+p.eggs || 0); } return n; };
+    const cum = sig => prev(sig) + (+((progOf(t, sig) || {}).caps) || 0);
+    const who = DB.teamOrder.filter(sig => pgHas((progOf(t, sig) || {}).caps));
+    const mean = who.length ? who.reduce((a, sig) => a + cum(sig), 0) / who.length : 0;
+    return { mean, cum, n: who.length, label: t > 1 ? `Media acumulada J1–J${t}` : 'Media del tramo' };
+  }
+  const fmt1 = n => (Math.round(n * 10) / 10).toString().replace('.', ',');
   function progressCard() {
     if (!VOTE_URL) return '';
     voteLoad(false);
@@ -220,10 +230,11 @@
     if (!VOTE.data) return wrap(head('') + `<div style="font-size: 13px; color: #9296AD; padding: 18px 0;">${VOTE.error ? 'No se ha podido conectar con el sheet para leer el progreso.' : 'Cargando progreso…'}</div>`);
     if (!VOTE.prog) return wrap(head('') + '<div style="font-size: 13px; color: #9296AD; padding: 18px 0;">Falta actualizar el script del sheet para usar el progreso: pega el Codigo.gs nuevo, ejecuta "configurar" y publica una versión nueva.</div>');
     const data = DB.ranking.map(r => ({ sig: r.sig, lv: kind === 'past' ? target : levelOf(kind === 'next' ? now : sel, r.sig), cap: kind === 'next' ? '' : (progOf(sel, r.sig) || {}).caps, eggs: kind === 'next' ? 0 : +((progOf(sel, r.sig) || {}).eggs) || 0 }));
-    const caps = data.filter(d => pgHas(d.cap)).map(d => +d.cap);
-    // Media del tramo: solo capturas originales (sin huevos), como valor orientativo
-    const mean = caps.length ? caps.reduce((a, b) => a + b, 0) / caps.length : 0; const fmt1 = n => (Math.round(n * 10) / 10).toString().replace('.', ',');
-    const isLow = d => pgHas(d.cap) && caps.length > 1 && (+d.cap + d.eggs) <= mean - 1;
+    const st = pgStats(sel); const mean = st.mean;
+    data.forEach(d => { d.cum = st.cum(d.sig); d.tot = d.cum + d.eggs; });
+    const isLow = d => pgHas(d.cap) && st.n > 1 && d.tot <= mean - 1;
+    // Total acumulado de cada equipo hasta este tramo incluido: capturas + huevos de todos los tramos (también los de este)
+    const totLine = (d, red) => kind === 'next' ? '' : `<div style="font-size: 10px; color: #9296AD; margin-top: 2px;">Total acumulado <b style="color: ${red ? '#E63946' : '#D8D9E3'};">${d.tot}</b></div>`;
     const rows = data.map(d => {
       const ok = kind === 'past' || (target && d.lv >= target); const pct = kind === 'past' ? 100 : target ? Math.min(100, Math.round(d.lv / target * 100)) : 0; const hasCap = pgHas(d.cap);
       const low = isLow(d);
@@ -231,8 +242,8 @@
         : !d.lv ? '<span style="font-size: 12px; color: #4A4E63;">Sin apuntar</span>'
         : ok ? `<span style="${SG} font-size: 13px; font-weight: 700; color: #4CC9F0;">✓ Nv. ${d.lv}</span>`
         : `<span style="${SG} font-size: 14px; font-weight: 700;">Nv. ${d.lv}</span> <span style="font-size: 11px; color: #9296AD;">/ ${target}</span>`;
-      const capTxt = hasCap ? `${kind === 'past' ? '<span style="font-size: 10px; margin-right: 4px;">🔒</span>' : ''}<span style="${SG} font-size: 14px; font-weight: 700; color: ${low ? '#E63946' : '#F4F1EA'};">${d.cap}</span> <span style="font-size: 11px; color: #9296AD;">captura${+d.cap === 1 ? '' : 's'}</span>${d.eggs ? ` <span style="font-size: 11px; font-weight: 700; color: #F5B700; background: rgba(245,183,0,0.12); border-radius: 9px; padding: 2px 7px; margin-left: 4px;">+${d.eggs} 🥚</span>` : ''}`
-        : `<span style="font-size: 12px; color: #4A4E63;">${kind === 'past' ? 'Sin apuntar' : '— capturas'}</span>`;
+      const capTxt = hasCap ? `${kind === 'past' ? '<span style="font-size: 10px; margin-right: 4px;">🔒</span>' : ''}<span style="${SG} font-size: 14px; font-weight: 700; color: ${low ? '#E63946' : '#F4F1EA'};">${d.cap}</span> <span style="font-size: 11px; color: #9296AD;">captura${+d.cap === 1 ? '' : 's'}</span>${d.eggs ? ` <span style="font-size: 11px; font-weight: 700; color: #F5B700; background: rgba(245,183,0,0.12); border-radius: 9px; padding: 2px 7px; margin-left: 4px;">+${d.eggs} 🥚</span>` : ''}${totLine(d, low)}`
+        : `<span style="font-size: 12px; color: #4A4E63;">${kind === 'past' ? 'Sin apuntar' : '— capturas'}</span>${d.tot ? totLine(d, false) : ''}`;
       return `<div style="display: grid; grid-template-columns: 150px minmax(0, 1fr) 92px 170px; align-items: center; gap: 16px;">
           <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">${logo(d.sig, 30, `border: 2px solid ${T(d.sig).color};`)}<div style="min-width: 0;"><div style="${SG} font-size: 14px; font-weight: 700;">${esc(d.sig)}</div><div style="font-size: 10px; color: #9296AD;">${esc(T(d.sig).coach)}</div></div></div>
           <div style="height: 10px; border-radius: 5px; background: #232640; overflow: hidden;"><div style="width: ${pct}%; height: 100%; border-radius: 5px; background: ${ok ? '#4CC9F0' : '#F5B700'};"></div></div>
@@ -242,9 +253,9 @@
     }).join('');
     const ready = data.filter(d => target && d.lv >= target).length;
     const missing = data.filter(d => !pgHas(d.cap)).length;
-    const eggTxt = data.filter(d => pgHas(d.cap) && d.eggs).map(d => `${esc(d.sig)}: ${d.cap} + ${d.eggs} 🥚 = <b style="color: #F4F1EA;">${+d.cap + d.eggs}</b>`);
-    const lowTxt = data.filter(isLow).map(d => `${esc(d.sig)}: ${fmt1(mean - (+d.cap + d.eggs))} por debajo`);
-    const capSum = !caps.length ? 'Capturas del tramo sin apuntar' : `Media del tramo: <b style="color: #F4F1EA;">${fmt1(mean)}</b> capturas <span style="color: #4A4E63;">(orientativa)</span>${eggTxt.length ? ' · ' + eggTxt.join(' · ') : ''}${lowTxt.length ? ` · <span style="color: #E63946; font-weight: 600;">${lowTxt.join(', ')}</span>` : ''}`;
+    const eggTxt = data.filter(d => pgHas(d.cap) && d.eggs).map(d => `${esc(d.sig)}: ${d.cum} + ${d.eggs} 🥚 = <b style="color: #F4F1EA;">${d.tot}</b>`);
+    const lowTxt = data.filter(isLow).map(d => `${esc(d.sig)}: ${fmt1(mean - d.tot)} por debajo`);
+    const capSum = !st.n ? 'Capturas del tramo sin apuntar' : `${st.label}: <b style="color: #F4F1EA;">${fmt1(mean)}</b> capturas <span style="color: #4A4E63;">(orientativa)</span>${eggTxt.length ? ' · ' + eggTxt.join(' · ') : ''}${lowTxt.length ? ` · <span style="color: #E63946; font-weight: 600;">${lowTxt.join(', ')}</span>` : ''}`;
     const btn = txt => `<div class="clickable" onclick="pgOpen()" style="padding: 8px 16px; border-radius: 20px; background: rgba(245,183,0,0.12); border: 1px solid #F5B700; color: #F5B700; font-size: 12px; font-weight: 700; white-space: nowrap;">${txt}</div>`;
     const ghost = txt => `<div style="padding: 8px 14px; border-radius: 20px; background: #232640; color: #9296AD; font-size: 12px; font-weight: 600; white-space: nowrap;">${txt}</div>`;
     const right = kind === 'now' ? btn('Actualizar mi progreso') : kind === 'past' ? btn(missing ? 'Apuntar capturas / huevos' : 'Añadir huevos') : ghost(`Se abre al terminar la Jornada ${sel - 1}`);
@@ -254,7 +265,7 @@
       : capSum;
     return wrap(head(right) + `<div style="display: flex; flex-direction: column; gap: 12px;">${rows}</div>
       <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 12px; color: #9296AD;">
-        <div>${footL}</div><div>${footR}</div>
+        <div style="white-space: nowrap;">${footL}</div><div style="text-align: right;">${footR}</div>
       </div>`);
   }
   const pgClamp = (v, a, b) => Math.max(a, Math.min(b, Math.round(+v) || 0));
@@ -281,8 +292,8 @@
     const chip = sig => `<div class="clickable" onclick="pgTeam('${esc(sig)}')" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 6px; border-radius: 12px; ${g.team === sig ? 'border: 2px solid #F5B700; background: rgba(245,183,0,0.10);' : 'border: 1px solid rgba(255,255,255,0.08); background: #232640;'}">${logo(sig, 36)}<div style="${SG} font-size: 13px; font-weight: 700;">${esc(sig)}</div><div style="font-size: 10px; color: #9296AD;">${esc(T(sig).coach)}</div></div>`;
     const lab = 'font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;';
     const lockedField = (txt, val, hint) => `<div style="flex: 1; min-width: 0;"><div style="${lab}">${txt}</div><div style="height: 44px; border-radius: 10px; background: #12131C; border: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: center; ${SG} font-size: 20px; font-weight: 700; color: #9296AD;">🔒 ${val}</div><div style="font-size: 10px; color: #9296AD; margin-top: 5px;">${hint}</div></div>`;
-    const capsAll = DB.teamOrder.map(x => (progOf(t, x) || {}).caps).filter(pgHas).map(Number);
-    const meanTxt = capsAll.length ? ` · media del tramo: ${(Math.round(capsAll.reduce((a, b) => a + b, 0) / capsAll.length * 10) / 10).toString().replace('.', ',')} capturas (orientativa)` : '';
+    const st = pgStats(t);
+    const meanTxt = st.n ? ` · ${t > 1 ? `media acumulada J1–J${t}` : 'media del tramo'}: ${fmt1(st.mean)} capturas (orientativa)${g.team && pgHas((progOf(t, g.team) || {}).caps) ? `, tu total: ${st.cum(g.team)} + huevos` : ''}` : '';
     const sq = 'width: 38px; height: 44px; border-radius: 10px; background: #232640; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; color: #D8D9E3; user-select: none;';
     const field = (k, lab, hint) => `<div style="flex: 1; min-width: 0;${g.team ? '' : ' opacity: 0.35; pointer-events: none;'}"><div style="font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">${lab}</div>
         <div style="display: flex; align-items: center; gap: 8px;">
@@ -316,7 +327,9 @@
   function teamCaptures(sig) {
     if (!VOTE_URL || !VOTE.prog) return '';
     const line = t => { const p = progOf(t, sig); const has = p && p.caps !== '' && p.caps != null; return `<div style="display: flex; justify-content: space-between; font-size: 13px; gap: 8px;"><span style="color: #9296AD;">${TRAMO[t].charAt(0).toUpperCase() + TRAMO[t].slice(1)}</span><span style="font-weight: 600;${has ? '' : ' color: #4A4E63;'}">${has ? p.caps : '—'}${has && +p.eggs ? ` <span style="color: #F5B700; font-size: 11px;">+${+p.eggs} 🥚</span>` : ''}</span></div>`; };
-    return `<div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase; margin-top: 10px;">Capturas</div>${[1, 2, 3, 4].map(line).join('')}`;
+    let tot = 0, any = false; [1, 2, 3, 4].forEach(t => { const p = progOf(t, sig); if (p) { tot += (+p.caps || 0) + (+p.eggs || 0); any = any || pgHas(p.caps) || +p.eggs > 0; } });
+    const total = `<div style="display: flex; justify-content: space-between; font-size: 13px; gap: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);"><span style="color: #D8D9E3; font-weight: 600;" title="Capturas + huevos de todos los tramos">Total acumulado</span><span style="font-weight: 700;${any ? ' color: #F4F1EA;' : ' color: #4A4E63;'}">${any ? tot : '—'}</span></div>`;
+    return `<div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase; margin-top: 10px;">Capturas</div>${[1, 2, 3, 4].map(line).join('')}${total}`;
   }
   function calStatus(e) {
     if (e.state === 'jugado') return { txt: '✓ ' + (e.date ? fmtDate(e.date, e.hasTime) : 'Jugado'), color: '#9296AD', w: 600 };
