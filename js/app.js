@@ -858,6 +858,7 @@
           <div style="max-width: 103px; overflow: hidden;">
             ${nameHtml}
             <div style="font-size: 9px; color: ${alive ? '#9296AD' : '#E63946'};">Nv. ${m.level}${alive ? '' : ' · KO'}</div>
+            ${m.ability ? `<div style="font-size: 9px; color: #D8D9E3; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Habilidad: ${esc(m.ability)}">${esc(m.ability)}</div>` : ''}
           </div>
         </div>
         <div style="flex: 1; font-size: 10px; color: #9296AD; line-height: 1.6; text-align: left; padding-left: 28px;">${m.moves.map(x => '· ' + esc(x)).join('<br>')}</div>

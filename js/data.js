@@ -137,6 +137,7 @@
         team: S(r[8]) || sideTeams[0], poke, nick: S(r[10]), gender: S(r[11]),
         level: N(r[12]) || DB.levels[e.j] || '', item: S(r[13]),
         moves: [S(r[14]), S(r[15]), S(r[16]), S(r[17])].filter(Boolean),
+        ability: S(r[22]),   // columna W (Habilidad), solo si se ha visto en el combate
         ko, kills, assists
       };
       const side = cb.sides[lado];
