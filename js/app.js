@@ -525,25 +525,77 @@
       const on = x === j, ok = avail.includes(x);
       return `<div ${ok && !on ? `class="clickable" onclick="setRecap('${sig}', ${x})"` : ''} title="${ok ? '' : 'Jornada sin jugar'}" style="padding: 6px 14px; border-radius: 16px; font-size: 12px; font-weight: ${on ? 700 : 600}; ${on ? 'background: #F5B700; color: #12131C;' : ok ? 'background: #232640; color: #9296AD;' : 'background: #232640; color: #4A4E63;'}">J${x}</div>`;
     }).join('');
-    const mons = ((voteCands(j).per || {})[sig] || []).slice().sort((a, b) => (b.kills - a.kills) || (b.combats - a.combats));
+    // Pokémon de cada formato: individuales (todos sus enfrentamientos 1vs1) y 2vs2 conjunto (los suyos + los del compañero)
+    const ORD = ['mvp', 'asist', 'dpoy', 'sexto', 'first', 'second'], BIGA = ['mvp', 'asist', 'dpoy', 'sexto'];
     const aw = DB.awards.filter(a => a.j === j && a.team === sig);
-    const ORD = ['mvp', 'asist', 'dpoy', 'sexto', 'first', 'second'];
-    const card = m => {
-      const dim = !m.combats;
-      const my = aw.filter(a => String(a.poke).toLowerCase() === String(m.poke).toLowerCase()).map(a => a.type).sort((a, b) => ORD.indexOf(a) - ORD.indexOf(b));
-      const medals = my.map((t, i) => badge(t, 19, i > 0, i > 0 ? 'margin-left: -6px;' : '')).join('');
-      return `<div style="position: relative; background: #232640; border-radius: 10px; padding: 8px 6px 9px; display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center;${dim ? ' opacity: 0.55;' : ''}" title="${dim ? 'Lo llevó pero no llegó a jugar' : ''}">
-        ${medals ? `<div style="position: absolute; top: 6px; left: 6px; display: flex; align-items: center;">${medals}</div>` : ''}
-        <img src="${sprite(m.poke)}" ${onErr} style="width: 56px; height: 56px; object-fit: contain; margin-top: 6px;${dim ? ' filter: grayscale(60%);' : ''}">
-        <div style="font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;" title="${esc(pretty(m.poke))}">${esc(monName(m))}</div>
-        <div style="font-size: 10px; color: #9296AD;">${m.kills} kills · ${m.combats} ${m.combats === 1 ? 'combate' : 'combates'}</div>
+    const collect = (enfs, teams) => {
+      const out = {}; for (const t of teams) out[t] = [];
+      const by = {};
+      for (const e of enfs) for (const cb of e.combats) for (const l of ['Local', 'Visitante']) {
+        const sd = cb.sides[l];
+        const add = (m, played) => {
+          if (!m || !m.poke || !out[m.team]) return;
+          const k = `${m.team}|${m.poke}|${m.nick}`;
+          const r = by[k] || (by[k] = (out[m.team].push({ team: m.team, poke: m.poke, nick: m.nick, kills: 0, combats: 0 }), out[m.team][out[m.team].length - 1]));
+          if (played) { r.kills += m.kills; r.combats++; }
+        };
+        for (const m of sd.tit) add(m, true);
+        for (const m of [...sd.bans, ...sd.subs]) add(m, false);
+      }
+      for (const t of teams) out[t].sort((a, b) => (b.kills - a.kills) || (b.combats - a.combats));
+      return out;
+    };
+    const mine = e => e.local.includes(sig) || e.visit.includes(sig);
+    const indE = DB.enfs.filter(e => e.j === j && !e.duo && mine(e));
+    const duoE = DB.enfs.filter(e => e.j === j && e.duo && mine(e));
+    const SZ = { 3: [96, 42], 4: [76, 34], 5: [60, 28] };
+    const card = (m, cols, mate) => {
+      const [spr, md] = SZ[cols] || (cols < 3 ? [110, 46] : [52, 24]);
+      const my = mate ? [] : aw.filter(a => String(a.poke).toLowerCase() === String(m.poke).toLowerCase()).map(a => a.type).sort((a, b) => ORD.indexOf(a) - ORD.indexOf(b));
+      const med = list => list.map((t, i) => `<div title="${esc(BADGE[t].name)} de la Jornada ${j}" style="display: flex;${i ? ' margin-left: -8px;' : ''}">${badge(t, Math.round(md / 1.35))}</div>`).join('');
+      const L = med(my.filter(t => BIGA.includes(t))), R = med(my.filter(t => !BIGA.includes(t)));
+      const ring = !mate && duoMode ? ` box-shadow: inset 0 0 0 1.5px ${hexA(T(sig).color, 0.6)};` : '';
+      return `<div style="position: relative; background: ${mate ? '#1A1C2A' : '#232640'}; border-radius: 12px; padding: ${cols <= 3 ? 14 : 10}px 8px ${cols <= 3 ? 12 : 10}px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-align: center; min-width: 0;${ring}${mate ? ' opacity: 0.5;' : ''}" ${mate ? `title="Pokémon de ${esc(T(m.team).coach)} (${esc(m.team)}), compañero"` : ''}>
+        ${L ? `<div style="position: absolute; top: 6px; left: 6px; display: flex; z-index: 2;">${L}</div>` : ''}
+        ${R ? `<div style="position: absolute; top: 6px; right: 6px; display: flex; z-index: 2;">${R}</div>` : ''}
+        ${mate ? logo(m.team, 20, 'position: absolute; top: 7px; right: 7px; border: 1px solid rgba(0,0,0,0.5);') : ''}
+        <img src="${sprite(m.poke)}" ${onErr} style="width: ${spr}px; height: ${spr}px; object-fit: contain; margin-top: ${cols <= 3 ? 8 : 4}px;">
+        <div style="font-size: ${cols <= 3 ? 13 : cols === 4 ? 12 : 11}px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;" title="${esc(pretty(m.poke))}">${esc(monName(m))}</div>
+        <div style="font-size: ${cols < 5 ? 11 : 10}px; color: #9296AD;">${m.kills} kills · ${m.combats} ${m.combats === 1 ? 'combate' : 'combates'}</div>
       </div>`;
     };
+    // Filas de ancho fijo: siempre simétrico; si una fila tiene menos, se centra
+    const rowsHtml = (rows, cols, mateRow) => rows.map((row, ri) => `<div style="display: flex; justify-content: center; gap: 10px;">${row.map(m => `<div style="flex: 0 0 calc((100% - ${(cols - 1) * 10}px) / ${cols}); display: flex; min-width: 0;"><div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">${card(m, cols, mateRow === ri)}</div></div>`).join('')}</div>`).join('');
+    const block = (title, rivals, inner, extra = '') => `<div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;"><div style="display: flex; align-items: baseline; gap: 12px; font-size: 12px;"><span style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; color: #D8D9E3; letter-spacing: 0.5px; text-transform: uppercase; font-size: 11px;">${title}</span><span style="color: #9296AD;">${rivals}</span></div>${extra}</div>
+      <div style="display: flex; flex-direction: column; gap: 10px;">${inner}</div></div>`;
+    let duoMode = false; const blocks = [];
+    if (indE.length) {
+      const list = collect(indE, [sig])[sig];
+      if (list.length) {
+        const cols = Math.max(1, Math.ceil(list.length / 2));
+        const rivals = [...new Set(indE.map(e => (e.local.includes(sig) ? e.visit : e.local).join(' & ')))].map(r => `vs ${esc(r)}`).join(' · ');
+        blocks.push(block(duoE.length ? 'Individuales' : 'Individuales', rivals, rowsHtml([list.slice(0, cols), list.slice(cols)].filter(r => r.length), cols)));
+      }
+    }
+    for (const e of duoE) {
+      const side = e.local.includes(sig) ? e.local : e.visit, rival = e.local.includes(sig) ? e.visit : e.local;
+      const mate = side.find(t => t !== sig);
+      const got = collect([e], mate ? [sig, mate] : [sig]);
+      const own = got[sig], mt = mate ? got[mate] : [];
+      if (!own.length && !mt.length) continue;
+      duoMode = true;
+      const cols = Math.max(own.length, mt.length, 1);
+      const inner = rowsHtml([own, mt].filter(r => r.length), cols, own.length ? 1 : 0);
+      duoMode = false;
+      blocks.push(`<div style="padding-top: ${blocks.length ? 14 : 0}px;${blocks.length ? ' border-top: 1px solid rgba(255,255,255,0.06);' : ''}">` +
+        block(`2vs2${mate ? ` con ${esc(T(mate).coach)} (${esc(mate)})` : ''}`, `vs ${esc(rival.join(' & '))}`, inner.replace(/__RING__/g, ''), mate ? `<span style="font-size: 11px; color: #9296AD;">Arriba los de ${esc(sig)} · abajo, atenuados, los de su compañero</span>` : '') + '</div>');
+    }
     let right = '';
     if (VOTE_URL) {
       voteLoad(false);
       const got = rec() ? recGot(j, sig) : null;
-      right = `<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0;">
+      right = `<div style="width: 360px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
         <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;"><div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700;">Recompensas</div>${got && pos ? `<div style="font-size: 11px; color: #9296AD; white-space: nowrap;">${planTxt(pos)} · ruleta · tier</div>` : ''}</div>
         ${got ? got.rows.map(r => rewardRow(r)).join('') : `<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">${!rec() ? (VOTE.error ? 'No se ha podido conectar con el sheet' : 'Cargando…') : isDone ? 'Pendiente de tirar las ruletas' : 'Jornada sin terminar'}</div>`}
       </div>`;
@@ -556,10 +608,9 @@
         </div>
         <div style="display: flex; gap: 6px;">${pills}</div>
       </div>
-      <div style="display: grid; grid-template-columns: ${right ? 'minmax(0, 2fr) minmax(0, 1fr)' : 'minmax(0, 1fr)'}; gap: 28px; align-items: start;">
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <div style="display: flex; align-items: baseline; justify-content: space-between;"><div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700;">Pokémon que llevó</div><div style="font-size: 11px; color: #9296AD;">${mons.length} pokémon · kills y combates en la jornada</div></div>
-          ${mons.length ? `<div style="display: grid; grid-template-columns: repeat(${right ? 5 : 8}, minmax(0, 1fr)); gap: 10px;">${mons.map(card).join('')}</div>` : '<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">Todavía no hay combates apuntados</div>'}
+      <div style="display: flex; gap: 28px; align-items: flex-start;">
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+          ${blocks.join('') || '<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">Todavía no hay combates apuntados</div>'}
         </div>
         ${right}
       </div>
