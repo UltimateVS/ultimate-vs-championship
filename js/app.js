@@ -43,12 +43,12 @@
   }
 
   /* ---------------- navegación (hash) ---------------- */
-  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '', pg: null,
+  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '', pg: null, pr: { filter: 'all', type: '', dlg: null },
     rw: { j: 1, view: null, team: null, ask: null, wheel: '1', rot: 0, spinning: false, draft: null, last: null, msg: '', done: '', busy: false, sure: false, genAsk: false } };
 
   function route() {
     const [tab, arg] = (location.hash.replace('#', '') || 'inicio').split('/');
-    state.tab = ['inicio', 'equipos', 'clasificacion', 'jornadas', 'insignias', 'recompensas', 'historia'].includes(tab) ? tab : 'inicio';
+    state.tab = ['inicio', 'equipos', 'clasificacion', 'jornadas', 'insignias', 'recompensas', 'propuestas', 'historia'].includes(tab) ? tab : 'inicio';
     if (state.tab === 'equipos' && arg && DB.teams[arg]) { if (state.team !== arg) state.medOpen = false; state.team = arg; }
     if (state.tab === 'jornadas' && arg && DB.enfById[arg]) {
       const e = DB.enfById[arg];
@@ -57,7 +57,7 @@
       if (DB.jornadas[e.j - 1].enfs.indexOf(e) >= 2) state.sideExpanded = true;
     }
     state.voteView = null; state.voteAsk = null; state.voteDone = '';
-    state.pgT = null; state.pg = null;   // el progreso se abre siempre en el tramo actual   // la votación se cierra al cambiar de pestaña
+    state.pgT = null; state.pg = null; state.pr.dlg = null;   // el progreso se abre siempre en el tramo actual   // la votación se cierra al cambiar de pestaña
     if (state.tab === 'insignias') state.ins = defaultIns();
     if (state.tab === 'recompensas' && !state.rw.spinning) Object.assign(state.rw, { j: recDefaultJ(), anexo: null, view: null, team: null, ask: null, msg: '', done: '', genAsk: false, sure: false });
     render();
@@ -68,7 +68,7 @@
   function render() {
     document.querySelectorAll('.mainnav a').forEach(a => a.classList.toggle('active', a.dataset.tab === state.tab));
     const app = document.getElementById('app');
-    const fn = { inicio: renderInicio, equipos: renderEquipos, clasificacion: renderClasif, jornadas: renderJornadas, insignias: renderInsignias, recompensas: renderRecompensas, historia: renderHistoria }[state.tab];
+    const fn = { inicio: renderInicio, equipos: renderEquipos, clasificacion: renderClasif, jornadas: renderJornadas, insignias: renderInsignias, recompensas: renderRecompensas, propuestas: renderPropuestas, historia: renderHistoria }[state.tab];
     app.innerHTML = fn();
     if (state.tab === 'recompensas') rwDraw();
     if (state.tab === 'inicio') startCountdown();
@@ -818,20 +818,25 @@
       ${esc(coaches(sigs))} · ${esc(sigs.length > 1 ? sigs.map(s => T(s).short).join(' / ') : T(sigs[0]).name)}
     </div>`;
     let banRow = '';
-    if (e.j > 1 && (side.ban || side.sub)) {
-      const mini = (m, kind) => {
-        if (!m) return `<div style="flex: 1;"></div>`;
+    if (e.j > 1 && (side.bans.length || side.subs.length)) {
+      const mini = (m, kind, small) => {
+        if (!m) return `<div style="${small ? 'min-width: 0;' : 'flex: 1;'}"></div>`;
         const isBan = kind === 'Baneado';
-        return `<div style="position: relative; flex: 1; background: #1B1D2B; border: 1px dashed ${isBan ? 'rgba(230,57,70,0.4)' : 'rgba(146,150,173,0.4)'}; border-radius: 8px; padding: 8px; display: flex; align-items: center; gap: 10px;">
+        return `<div style="position: relative; ${small ? 'min-width: 0;' : 'flex: 1;'} background: #1B1D2B; border: 1px dashed ${isBan ? 'rgba(230,57,70,0.4)' : 'rgba(146,150,173,0.4)'}; border-radius: 8px; padding: ${small ? '6px 8px' : '8px'}; display: flex; align-items: center; gap: ${small ? 8 : 10}px;">
           ${shield ? logo(m.team, 16, 'position: absolute; top: 5px; right: 5px; border: 1px solid rgba(0,0,0,0.5);') : ''}
-          <img src="${sprite(m.poke)}" ${onErr} style="width: 46px; height: 46px; object-fit: contain; ${isBan ? 'filter: grayscale(80%) opacity(0.7);' : 'opacity: 0.75;'}">
-          <div>
+          <img src="${sprite(m.poke)}" ${onErr} style="width: ${small ? 38 : 46}px; height: ${small ? 38 : 46}px; object-fit: contain; ${isBan ? 'filter: grayscale(80%) opacity(0.7);' : 'opacity: 0.75;'}">
+          <div style="min-width: 0;">
             <div style="font-size: 8px; letter-spacing: 0.5px; text-transform: uppercase; color: ${isBan ? '#E63946' : '#9296AD'}; font-weight: 700;">${kind}</div>
-            <div style="font-size: 11px; font-weight: 700;">${esc(monName(m))}${genderMark(m, true)}</div>
+            <div style="font-size: 11px; font-weight: 700;${small ? ' white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' : ''}">${esc(monName(m))}${genderMark(m, true)}</div>
           </div>
         </div>`;
       };
-      banRow = `<div style="display: flex; gap: 8px;">${mini(side.ban, 'Baneado')}${mini(side.sub, 'Suplente')}</div>`;
+      if (shield) {
+        // 2vs2 conjunto: 1 baneado y 1 suplente de cada miembro de la pareja → rejilla 2×2 (fila de baneados, fila de suplentes)
+        const byTeam = list => { const out = [null, null]; const rest = []; for (const m of list) { const i = sigs.indexOf(m.team); if (i >= 0 && i < 2 && !out[i]) out[i] = m; else rest.push(m); } for (const m of rest) { const i = out.indexOf(null); if (i >= 0) out[i] = m; } return out; };
+        const bs = byTeam(side.bans), ss = byTeam(side.subs);
+        banRow = `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">${bs.map(m => mini(m, 'Baneado', true)).join('')}${side.subs.length ? ss.map(m => mini(m, 'Suplente', true)).join('') : ''}</div>`;
+      } else banRow = `<div style="display: flex; gap: 8px;">${mini(side.bans[0], 'Baneado')}${mini(side.subs[0], 'Suplente')}</div>`;
     }
     const mons = side.tit.slice().sort((a, b) => (a.ko - b.ko));
     return `<div style="display: flex; flex-direction: column; gap: 8px;">${head}${banRow}${mons.map(m => monCard(m, shield)).join('')}</div>`;
@@ -963,7 +968,7 @@
         for (const cb of e.combats) {
           const sd = cb.sides[lado];
           for (const m of sd.tit) { if (!m.poke) continue; const r = get(m); r.kills += m.kills; r.combats++; }
-          for (const m of [sd.ban, sd.sub]) if (m && m.poke) get(m);
+          for (const m of [...sd.bans, ...sd.subs]) if (m && m.poke) get(m);
         }
       }
       return out;
@@ -1132,7 +1137,7 @@
      (CFG.VOTE_URL). Si VOTE_URL está vacío, la web funciona como antes.
      ===================================================================== */
   const VOTE_URL = String(CFG.VOTE_URL || '').trim();
-  const VOTE = { data: null, rec: null, prog: null, loading: false, error: '', at: 0 };
+  const VOTE = { data: null, rec: null, prog: null, prop: null, propAdmin: 'SSUR', loading: false, error: '', at: 0 };
   const AWK = ['mvp', 'asist', 'dpoy', 'sexto', 'first', 'second'];
   const AWN = { mvp: 3, asist: 3, dpoy: 3, sexto: 3, first: 6, second: 6 };
   const sk = j => j === 'T' ? 'T' : String(j);
@@ -1148,10 +1153,11 @@
       const r = await fetch(VOTE_URL + (VOTE_URL.includes('?') ? '&' : '?') + 't=' + Date.now());
       const d = await r.json();
       if (!d || !d.ok) throw new Error((d && d.error) || 'respuesta no válida');
-      VOTE.data = d.scopes || {}; VOTE.rec = d.rec || null; VOTE.prog = d.prog || null; VOTE.error = ''; VOTE.detail = '';
+      VOTE.data = d.scopes || {}; VOTE.rec = d.rec || null; VOTE.prog = d.prog || null; VOTE.prop = d.prop || null; VOTE.propAdmin = d.propAdmin || 'SSUR'; VOTE.error = ''; VOTE.detail = '';
     } catch (err) { VOTE.error = 'No se ha podido conectar con la votación'; VOTE.detail = String((err && err.message) || ''); }
     VOTE.loading = false;
-    if (['inicio', 'insignias', 'recompensas', 'equipos'].includes(state.tab) && !state.rw.spinning) render();
+    if (state.tab === 'propuestas' && state.pr.dlg && state.pr.dlg.kind === 'new') return;   // no borrar lo que se está escribiendo
+    if (['inicio', 'insignias', 'recompensas', 'equipos', 'propuestas'].includes(state.tab) && !state.rw.spinning) render();
   }
 
   // Orden de los equipos: clasificación de la jornada (o general en el Total)
@@ -1170,7 +1176,7 @@
       for (const cb of e.combats) for (const lado of ['Local', 'Visitante']) {
         const sd = cb.sides[lado];
         for (const m of sd.tit) { if (!m.poke) continue; const r = get(m); r.kills += m.kills; r.combats++; }
-        for (const m of [sd.ban, sd.sub]) if (m && m.poke) get(m);
+        for (const m of [...sd.bans, ...sd.subs]) if (m && m.poke) get(m);
       }
     }
     return { per, byKey };
@@ -1641,6 +1647,210 @@
   }
 
   /* ---- vista principal de la jornada ---- */
+  /* =====================================================================
+     7b · PROPUESTAS: nuevas normas, cambios y sugerencias que votan los equipos.
+     Sale adelante si al cerrar hay más "Sí" que "No". Se cierra al acabar el plazo o cuando han votado los 4.
+     ===================================================================== */
+  const PR_TYPES = {
+    'Nueva norma': ['#F5B700', 'rgba(245,183,0,0.14)', 'Añadir una regla al reglamento'],
+    'Modificar norma': ['#4CC9F0', 'rgba(76,201,240,0.12)', 'Cambiar una regla que ya existe'],
+    'Quitar norma': ['#E63946', 'rgba(230,57,70,0.12)', 'Eliminar una regla'],
+    'Sugerencia': ['#B9BCD6', 'rgba(146,150,173,0.16)', 'Ideas para la web, la organización…']
+  };
+  const PR_TEAMS = () => ['EGK9', 'FCBM', 'SSUR', 'HWWG'].filter(s => DB.teams[s]).concat(DB.teamOrder.filter(s => !['EGK9', 'FCBM', 'SSUR', 'HWWG'].includes(s)));
+  const DAYS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  const prPill = ty => { const c = PR_TYPES[ty] || PR_TYPES.Sugerencia; return `<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; padding: 3px 9px; border-radius: 10px; color: ${c[0]}; background: ${c[1]}; white-space: nowrap;">${esc(ty)}</span>`; };
+  const prDate = s => { const d = new Date(s); return isNaN(d) ? null : d; };
+  const prCount = p => { let si = 0, no = 0; for (const v of Object.values(p.votes || {})) { if (v === 'si') si++; else if (v === 'no') no++; } return { si, no, n: si + no }; };
+  const prOpen = p => !p.closedAt && prDate(p.closes) && prDate(p.closes).getTime() > Date.now();
+  const prEnd = p => prDate(p.closedAt) || prDate(p.closes) || new Date(0);
+  const prLeft = ms => { const m = Math.max(1, Math.round(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+  const prAgo = d => { const m = Math.round((Date.now() - d) / 60000); if (m < 60) return `hace ${Math.max(1, m)} min`; const h = Math.round(m / 60); if (h < 24) return `hace ${h} h`; const dd = Math.round(h / 24); return `hace ${dd} día${dd === 1 ? '' : 's'}`; };
+  const prWhen = d => `${DAYS[d.getDay()]} ${fmtDay(d)} a las ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  // Normas del reglamento (pestaña Historia) para el desplegable de "Modificar / Quitar norma"
+  function prRules() {
+    const out = [];
+    for (const reg of ['Nuzlocke', 'VS']) {
+      let sec = '';
+      for (const r of (DB.rules && DB.rules[reg]) || []) {
+        if (r.type === 'Sección') sec = r.text;
+        else if (r.type === 'Regla') out.push(`${reg} · ${sec} · ${r.text}`);
+      }
+    }
+    return out;
+  }
+  const prRuleHead = rule => String(rule || '').split(' · ').slice(0, 2).join(' · ');
+  const prRuleText = rule => String(rule || '').split(' · ').slice(2).join(' · ');
+
+  window.prFilter = f => { state.pr.filter = f; render(); };
+  window.prType = t => { state.pr.type = t; render(); };
+  window.prNew = () => { state.pr.dlg = { kind: 'new', team: null, type: 'Nueva norma', rule: '', title: '', text: '', hours: 24, busy: false, msg: '' }; render(); };
+  window.prVote = (id, vote) => { state.pr.dlg = { kind: 'vote', id, vote, team: null, busy: false, msg: '' }; render(); };
+  window.prExt = id => { state.pr.dlg = { kind: 'ext', id, busy: false, msg: '' }; render(); };
+  window.prClose = () => { state.pr.dlg = null; render(); };
+  window.prSet = (k, v, redraw) => { const g = state.pr.dlg; if (!g) return; g[k] = k === 'hours' ? +v : v; if (k === 'type' && !['Modificar norma', 'Quitar norma'].includes(v)) g.rule = ''; g.msg = ''; if (redraw) render(); };
+  async function prPost(body) {
+    const g = state.pr.dlg; g.busy = true; g.msg = ''; render();
+    try {
+      const r = await fetch(VOTE_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+      const d = await r.json(); if (!d || !d.ok) throw new Error((d && d.error) || 'El sheet no ha aceptado el envío');
+      state.pr.dlg = null; await voteLoad(true); render();
+    } catch (err) { g.busy = false; g.msg = 'No se ha podido guardar: ' + (err.message || 'error de conexión'); render(); }
+  }
+  window.prSend = () => {
+    const g = state.pr.dlg; if (!g || g.busy) return;
+    if (g.kind === 'new') {
+      if (!g.team) { g.msg = 'Elige tu equipo'; return render(); }
+      if (!g.title.trim()) { g.msg = 'Ponle un título'; return render(); }
+      if (['Modificar norma', 'Quitar norma'].includes(g.type) && !g.rule) { g.msg = 'Elige qué norma'; return render(); }
+      return prPost({ action: 'propuesta', team: g.team, type: g.type, rule: g.rule, title: g.title.trim(), text: g.text.trim(), hours: g.hours });
+    }
+    if (g.kind === 'vote') { if (!g.team) return; return prPost({ action: 'votoPropuesta', id: g.id, team: g.team, vote: g.vote }); }
+    if (g.kind === 'ext') return prPost({ action: 'ampliarPropuesta', id: g.id, team: VOTE.propAdmin || 'SSUR' });
+  };
+
+  function prVoteRow(sig, v) {
+    const [col, txt] = v === 'si' ? ['#4CC9F0', '✓ Sí'] : v === 'no' ? ['#E63946', '✗ No'] : ['#4A4E63', 'Sin votar'];
+    return `<div style="display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 10px; background: #232640;${v ? '' : ' opacity: 0.7;'}">${logo(sig, 22)}<div style="font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; flex: 1;">${esc(sig)}</div><div style="font-size: 12px; font-weight: 700; color: ${col};">${txt}</div></div>`;
+  }
+  function prOpenCard(p) {
+    const SG = "font-family: 'Space Grotesk', sans-serif;";
+    const at = prDate(p.at) || new Date(), cl = prDate(p.closes);
+    const pct = Math.min(100, Math.max(2, Math.round((Date.now() - at) / Math.max(1, cl - at) * 100)));
+    const hours = Math.round((cl - at) / 3600000) - 24 * (p.ext || 0);
+    const { si, no, n } = prCount(p); const teams = PR_TEAMS();
+    const ref = p.rule && ['Modificar norma', 'Quitar norma'].includes(p.type) ? `<div style="border-left: 3px solid ${PR_TYPES[p.type][0]}; background: #232640; border-radius: 0 10px 10px 0; padding: 9px 12px; font-size: 12px; color: #9296AD; line-height: 1.5;"><b style="color: #D8D9E3;">Norma actual</b> · ${esc(prRuleHead(p.rule))}<br><span style="text-decoration: line-through; text-decoration-color: rgba(230,57,70,0.6);">${esc(prRuleText(p.rule))}</span></div>` : '';
+    const btn = (txt, col, bg, on) => `<div class="clickable" onclick="${on}" style="padding: 8px 16px; border-radius: 20px; background: ${bg}; border: 1px solid ${col}; color: ${col}; font-size: 12px; font-weight: 700; white-space: nowrap;">${txt}</div>`;
+    return `<div class="card" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0;">${prPill(p.type)}<span style="font-size: 12px; color: #9296AD;">Propuesta por</span>${logo(p.team, 18)}<span style="font-size: 12px; color: #D8D9E3; font-weight: 600;">${esc(p.team)} · ${esc(T(p.team).coach)}</span><span style="font-size: 12px; color: #4A4E63;">· ${prAgo(at)}</span></div>
+          <div style="text-align: right; flex-shrink: 0;"><div style="${SG} font-size: 14px; font-weight: 700; color: #F5B700;">⏱ Cierra en ${prLeft(cl - Date.now())}</div><div style="font-size: 10px; color: #9296AD; margin-top: 2px;">${p.ext ? `Ampliada ${p.ext} ${p.ext === 1 ? 'vez' : 'veces'} (+${24 * p.ext} h)` : `Abierta ${hours} h`} · ${prWhen(cl)}</div></div>
+        </div>
+        <div style="height: 4px; border-radius: 2px; background: #232640; overflow: hidden; margin-top: -6px;"><div style="width: ${pct}%; height: 100%; background: #F5B700;"></div></div>
+        <div style="${SG} font-size: 19px; font-weight: 700; line-height: 1.3;">${esc(p.title)}</div>
+        ${ref}
+        ${p.text ? `<div style="font-size: 13.5px; color: #D8D9E3; line-height: 1.55; white-space: pre-line;">${esc(p.text)}</div>` : ''}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">${teams.map(s => prVoteRow(s, (p.votes || {})[s])).join('')}</div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap;">
+          <div style="font-size: 12px; color: #9296AD;"><b style="color: #4CC9F0;">${si} Sí</b> · <b style="color: #E63946;">${no} No</b> · ${teams.length - n} sin votar · <span style="color: ${si > no ? '#4CC9F0' : '#E63946'}; font-weight: 700;">Ahora mismo ${si > no ? 'saldría adelante' : 'no saldría'}</span></div>
+          <div style="display: flex; gap: 8px;">
+            ${btn('Votar Sí', '#4CC9F0', 'rgba(76,201,240,0.14)', `prVote('${esc(p.id)}', 'si')`)}
+            ${btn('Votar No', '#E63946', 'rgba(230,57,70,0.12)', `prVote('${esc(p.id)}', 'no')`)}
+            <div class="clickable" onclick="prExt('${esc(p.id)}')" title="Solo ${esc(VOTE.propAdmin || 'SSUR')} puede ampliar el plazo" style="padding: 8px 14px; border-radius: 20px; background: #232640; color: #9296AD; font-size: 12px; font-weight: 600;">+24 h</div>
+          </div>
+        </div>
+      </div>`;
+  }
+  function prHistItem(p) {
+    const SG = "font-family: 'Space Grotesk', sans-serif;";
+    const { si, no } = prCount(p); const ok = si > no; const c = ok ? '#4CC9F0' : '#E63946';
+    const norma = p.type !== 'Sugerencia';
+    const foot = [];
+    if (ok) foot.push(p.applied ? `<span style="color: #4CC9F0; font-weight: 600;">✓ ${norma ? 'Ya está en el reglamento' : 'Hecho'}</span>` : `<span style="color: #F5B700; font-weight: 600;">● ${norma ? 'Pendiente de añadir al reglamento' : 'Pendiente'}</span>`);
+    else if (si === no) foot.push('Empate: no sale');
+    if (p.rule) foot.push(esc(prRuleHead(p.rule)));
+    foot.push(`Propuesta por ${esc(p.team)}`);
+    return `<div style="background: #232640; border-radius: 12px; padding: 12px 14px; display: flex; gap: 12px; align-items: flex-start; border-left: 3px solid ${c};" title="${esc(p.text || p.title)}">
+        <div style="width: 26px; height: 26px; border-radius: 50%; background: ${hexA(c, 0.15)}; color: ${c}; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;">${ok ? '✓' : '✗'}</div>
+        <div style="flex: 1; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">${prPill(p.type)}<span style="font-size: 11px; color: #9296AD;">${fmtDay(prEnd(p))}</span></div>
+          <div style="font-size: 13.5px; font-weight: 600; line-height: 1.35;">${esc(p.title)}</div>
+          <div style="font-size: 11px; color: #9296AD; margin-top: 4px;">${foot.join(' · ')}</div>
+        </div>
+        <div style="text-align: right; flex-shrink: 0;"><div style="${SG} font-size: 15px; font-weight: 700; color: ${c};">${si}–${no}</div><div style="font-size: 10px; color: ${c}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">${ok ? 'Aprobada' : 'Rechazada'}</div></div>
+      </div>`;
+  }
+  function prDialog() {
+    const g = state.pr.dlg; if (!g) return '';
+    const SG = "font-family: 'Space Grotesk', sans-serif;";
+    const LAB = 'font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;';
+    const box = 'width: 100%; box-sizing: border-box; border-radius: 10px; background: #12131C; border: 1px solid rgba(255,255,255,0.15); padding: 10px 12px; font-size: 13px; line-height: 1.5; color: #F4F1EA; font-family: inherit;';
+    const chip = (sig, on, click) => `<div class="clickable" onclick="${click}" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 12px; ${on ? 'border: 2px solid #F5B700; background: rgba(245,183,0,0.10);' : 'border: 1px solid rgba(255,255,255,0.08); background: #232640;'}">${logo(sig, 30)}<div style="${SG} font-size: 12px; font-weight: 700;">${esc(sig)}</div></div>`;
+    const close = `<div class="clickable" onclick="prClose()" style="width: 30px; height: 30px; border-radius: 50%; background: #232640; color: #D8D9E3; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0;">✕</div>`;
+    const go = (txt, can) => `<div ${can && !g.busy ? 'class="clickable" onclick="prSend()"' : ''} style="padding: 12px; border-radius: 12px; background: ${can ? '#F5B700' : '#232640'}; color: ${can ? '#12131C' : '#4A4E63'}; text-align: center; ${SG} font-size: 14px; font-weight: 700;">${g.busy ? 'Guardando…' : txt}</div>`;
+    const msg = note => `<div style="font-size: 10.5px; color: ${g.msg ? '#E63946' : '#9296AD'}; text-align: center;">${esc(g.msg || note)}</div>`;
+    const wrap = (w, inner) => `<div onclick="prClose()" style="position: fixed; inset: 0; z-index: 50; background: rgba(10,11,18,0.8); display: flex; align-items: flex-start; justify-content: center; padding: 60px 16px; overflow-y: auto;">
+      <div onclick="event.stopPropagation()" style="width: ${w}px; max-width: 100%; box-sizing: border-box; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 26px 28px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">${inner}</div></div>`;
+    const teams = PR_TEAMS();
+    if (g.kind === 'new') {
+      const needRule = ['Modificar norma', 'Quitar norma'].includes(g.type);
+      const tycard = ty => { const c = PR_TYPES[ty], on = g.type === ty; return `<div class="clickable" onclick="prSet('type', '${ty}', true)" style="flex: 1; padding: 10px 12px; border-radius: 12px; ${on ? `border: 2px solid ${c[0]}; background: ${c[1]};` : 'border: 1px solid rgba(255,255,255,0.08); background: #232640;'}"><div style="font-size: 13px; font-weight: 700; color: ${on ? c[0] : '#F4F1EA'};">${ty}</div><div style="font-size: 10.5px; color: #9296AD; margin-top: 3px; line-height: 1.35;">${c[2]}</div></div>`; };
+      const rules = prRules();
+      const sel = `<select onchange="prSet('rule', this.value, true)" style="${box} appearance: auto;"><option value="">Elige la norma…</option>${rules.map(r => `<option value="${esc(r)}"${r === g.rule ? ' selected' : ''}>${esc(r.length > 120 ? r.slice(0, 117) + '…' : r)}</option>`).join('')}</select>`;
+      const closes = new Date(Date.now() + g.hours * 3600000);
+      const hp = h => `<div class="clickable" onclick="prSet('hours', ${h}, true)" style="padding: 7px 16px; border-radius: 16px; ${g.hours === h ? 'background: #F5B700; color: #12131C; font-weight: 700;' : 'background: #232640; color: #9296AD; font-weight: 600;'} font-size: 12px;">${h} h</div>`;
+      return wrap(640, `
+        <div style="display: flex; align-items: flex-start; justify-content: space-between;"><div><div style="${SG} font-size: 21px; font-weight: 700;">Nueva propuesta</div><div style="font-size: 12px; color: #9296AD; margin-top: 2px;">Se abre la votación en cuanto la publicas</div></div>${close}</div>
+        <div><div style="${LAB}">¿Qué equipo eres?</div><div style="display: flex; gap: 8px;">${teams.map(s => chip(s, g.team === s, `prSet('team', '${esc(s)}', true)`)).join('')}</div></div>
+        <div><div style="${LAB}">¿Qué quieres proponer?</div><div style="display: flex; gap: 8px; flex-wrap: wrap;">${Object.keys(PR_TYPES).map(tycard).join('')}</div></div>
+        ${needRule ? `<div><div style="${LAB}">¿Qué norma?</div>${sel}<div style="font-size: 10.5px; color: #9296AD; margin-top: 5px;">Normas del reglamento de la pestaña Historia (Nuzlocke y VS)</div></div>` : ''}
+        <div><div style="${LAB}">Título</div><input type="text" maxlength="140" value="${esc(g.title)}" oninput="prSet('title', this.value)" placeholder="Resume la propuesta en una frase" style="${box}"></div>
+        <div><div style="${LAB}">${g.type === 'Sugerencia' ? 'Explícala' : 'Cómo quedaría y por qué'}</div><textarea rows="4" maxlength="2000" oninput="prSet('text', this.value)" placeholder="${g.type === 'Sugerencia' ? 'Qué propones y para qué' : 'Escribe la norma tal como quedaría y el motivo'}" style="${box} resize: vertical;">${esc(g.text)}</textarea></div>
+        <div><div style="${LAB}">Tiempo de votación</div><div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">${hp(24)}${hp(48)}${hp(72)}<div style="font-size: 11px; color: #9296AD; margin-left: 6px;">Cierra el ${prWhen(closes)}</div></div></div>
+        ${go(g.team ? `Publicar propuesta de ${esc(g.team)}` : 'Elige tu equipo', !!g.team)}
+        ${msg('Sale adelante si al cerrar hay más síes que noes. Quien no vota no cuenta.')}`);
+    }
+    const p = (VOTE.prop || []).find(x => x.id === g.id); if (!p) return '';
+    if (g.kind === 'vote') {
+      const prev = g.team ? (p.votes || {})[g.team] : '';
+      const after = Object.assign({}, p.votes || {}); if (g.team) after[g.team] = g.vote;
+      const c = prCount({ votes: after });
+      const all = teams.every(s => after[s]);
+      const note = !g.team ? 'Tu voto se ve en directo y lo puedes cambiar mientras esté abierta.'
+        : prev && prev !== g.vote ? `Ya habías votado ${prev === 'si' ? 'Sí' : 'No'}: lo cambias a ${g.vote === 'si' ? 'Sí' : 'No'}.`
+        : all ? `Con este voto votan los ${teams.length}: la propuesta se cierra ya con ${c.si} Sí y ${c.no} No y ${c.si > c.no ? 'sale adelante' : 'no sale'}.`
+        : 'Tu voto se ve en directo y lo puedes cambiar mientras esté abierta.';
+      const vb = (v, txt, col) => `<div class="clickable" onclick="prSet('vote', '${v}', true)" style="flex: 1; padding: 12px; border-radius: 12px; ${g.vote === v ? `background: ${col}; color: #12131C;` : 'background: #232640; color: #9296AD;'} text-align: center; ${SG} font-size: 14px; font-weight: 700;">${txt}</div>`;
+      return wrap(520, `
+        <div style="display: flex; align-items: flex-start; justify-content: space-between;"><div><div style="${SG} font-size: 20px; font-weight: 700;">Votar <span style="color: ${g.vote === 'si' ? '#4CC9F0' : '#E63946'};">${g.vote === 'si' ? 'Sí' : 'No'}</span></div><div style="font-size: 12px; color: #9296AD; margin-top: 2px;">«${esc(p.title)}»</div></div>${close}</div>
+        <div><div style="${LAB}">¿Qué equipo eres?</div><div style="display: flex; gap: 8px;">${teams.map(s => chip(s, g.team === s, `prSet('team', '${esc(s)}', true)`)).join('')}</div></div>
+        <div style="display: flex; gap: 8px;">${vb('si', '✓ Sí', '#4CC9F0')}${vb('no', '✗ No', '#E63946')}</div>
+        ${go(g.team ? `Confirmo que soy ${esc(g.team)} · votar ${g.vote === 'si' ? 'Sí' : 'No'}` : 'Elige tu equipo', !!g.team)}
+        ${msg(note)}`);
+    }
+    const adm = VOTE.propAdmin || 'SSUR';
+    const nc = new Date((prDate(p.closes) || new Date()).getTime() + 24 * 3600000);
+    return wrap(480, `
+      <div style="display: flex; align-items: flex-start; justify-content: space-between;"><div><div style="${SG} font-size: 20px; font-weight: 700;">Ampliar 24 h</div><div style="font-size: 12px; color: #9296AD; margin-top: 2px;">«${esc(p.title)}»</div></div>${close}</div>
+      <div style="font-size: 13px; color: #D8D9E3; line-height: 1.5;">Solo <b>${esc(T(adm).coach)} (${esc(adm)})</b> puede ampliar el plazo. Pasaría a cerrar el <b>${prWhen(nc)}</b>.</div>
+      ${go(`Confirmo que soy ${esc(T(adm).coach)} (${esc(adm)}) · ampliar`, true)}
+      ${msg('Se puede ampliar las veces que haga falta mientras esté abierta.')}`);
+  }
+  function renderPropuestas() {
+    const SG = "font-family: 'Space Grotesk', sans-serif;";
+    const head = btn => `<div style="padding: 32px 64px 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+        <div><h1 style="margin: 0 0 4px; ${SG} font-size: 32px; font-weight: 700;">Propuestas</h1><div style="font-size: 14px; color: #9296AD;">Nuevas normas, cambios y sugerencias. Cada equipo vota y sale adelante si hay más síes que noes.</div></div>${btn}</div>`;
+    const info = msg => `<div class="card" style="margin: 24px 64px; padding: 28px; text-align: center; color: #9296AD; font-size: 14px;">${msg}</div>`;
+    if (!VOTE_URL) return head('') + info('Para usar las propuestas hay que conectar la web con el script del sheet (VOTE_URL en js/config.js).');
+    voteLoad(false);
+    if (!VOTE.data) return head('') + info(VOTE.error ? `No se ha podido conectar con el sheet.<div style="font-size: 11px; margin-top: 6px; color: #4A4E63;">${esc(VOTE.detail || '')}</div>` : 'Cargando propuestas…');
+    if (!VOTE.prop) return head('') + info('Falta actualizar el script del sheet para usar las propuestas: pega el Codigo.gs nuevo, ejecuta "configurar" y publica una versión nueva.');
+    const all = VOTE.prop;
+    const open = all.filter(prOpen).sort((a, b) => prDate(a.closes) - prDate(b.closes));
+    const closed = all.filter(p => !prOpen(p)).sort((a, b) => prEnd(b) - prEnd(a));
+    const okN = closed.filter(p => { const c = prCount(p); return c.si > c.no; }).length;
+    const f = state.pr.filter, ty = state.pr.type;
+    const hist = closed.filter(p => { const c = prCount(p); return (f === 'all' || (f === 'ok') === (c.si > c.no)) && (!ty || p.type === ty); });
+    const fp = (k, txt) => `<div class="clickable" onclick="prFilter('${k}')" style="padding: 6px 13px; border-radius: 14px; ${f === k ? 'background: #F5B700; color: #12131C; font-weight: 700;' : 'background: #232640; color: #9296AD; font-weight: 600;'} font-size: 12px;">${txt}</div>`;
+    const chipI = t => `<span style="padding: 5px 12px; border-radius: 14px; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08);">${t}</span>`;
+    const adm = VOTE.propAdmin || 'SSUR';
+    return head(`<div class="clickable" onclick="prNew()" style="padding: 11px 20px; border-radius: 22px; background: #F5B700; color: #12131C; ${SG} font-size: 14px; font-weight: 700;">+ Nueva propuesta</div>`) + `
+      <div style="padding: 14px 64px 0; display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; color: #9296AD;">${chipI(`⏱ 24 h de votación, ampliable por ${esc(T(adm).coach)}`)}${chipI('✓ Se aprueba con más síes que noes')}${chipI('✗ Empate o más noes: no sale')}${chipI(`Se cierra antes si votan los ${PR_TEAMS().length}`)}</div>
+      <div style="padding: 22px 64px 40px; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 24px; align-items: start;">
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; align-items: baseline; gap: 10px;"><div style="${SG} font-size: 18px; font-weight: 700;">En votación</div><div style="font-size: 12px; color: #9296AD;">${open.length ? `${open.length} abierta${open.length === 1 ? '' : 's'} · puedes cambiar tu voto hasta que cierre` : 'Ninguna abierta'}</div></div>
+          ${open.length ? open.map(prOpenCard).join('') : `<div class="card" style="padding: 28px; text-align: center; color: #9296AD; font-size: 13px;">No hay ninguna propuesta en votación. ¿Tienes una idea? Pulsa <b style="color: #F5B700;">+ Nueva propuesta</b>.</div>`}
+        </div>
+        <div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; align-items: baseline; justify-content: space-between;"><div style="${SG} font-size: 18px; font-weight: 700;">Histórico</div><div style="font-size: 12px; color: #9296AD;"><b style="color: #4CC9F0;">${okN}</b> aprobada${okN === 1 ? '' : 's'} · <b style="color: #E63946;">${closed.length - okN}</b> rechazada${closed.length - okN === 1 ? '' : 's'}</div></div>
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">${fp('all', 'Todas')}${fp('ok', 'Aprobadas')}${fp('ko', 'Rechazadas')}
+            <select onchange="prType(this.value)" style="margin-left: auto; padding: 6px 10px; border-radius: 14px; background: #232640; color: #9296AD; border: none; font-size: 12px; font-weight: 600; font-family: inherit;"><option value="">Todos los tipos</option>${Object.keys(PR_TYPES).map(t => `<option value="${t}"${ty === t ? ' selected' : ''}>${t}</option>`).join('')}</select></div>
+          <div style="display: flex; flex-direction: column; gap: 8px; max-height: 760px; overflow-y: auto;">${hist.length ? hist.map(prHistItem).join('') : `<div style="font-size: 12px; color: #4A4E63; padding: 18px 0; text-align: center;">${closed.length ? 'Ninguna con este filtro' : 'Todavía no se ha cerrado ninguna propuesta'}</div>`}</div>
+        </div>
+      </div>${prDialog()}`;
+  }
+  setInterval(() => { if (state.tab === 'propuestas' && !state.pr.dlg) render(); }, 30000);
+
   function renderRecompensas() {
     const s = state.rw; const j = s.j;
     const pills = [1, 2, 3, 4].map(k => `<div class="${k === j ? 'pill sel' : (DB.jornadas[k - 1] && DB.jornadas[k - 1].done ? 'pill' : 'pill muted')}" onclick="setRecJ(${k})">Jornada ${k}</div>`).join('');

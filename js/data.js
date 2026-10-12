@@ -144,7 +144,7 @@
         ko, kills, assists
       };
       const side = cb.sides[lado];
-      if (rol === 'Titular') side.tit.push(mon); else if (rol === 'Baneado') side.ban = mon; else side.sub = mon;
+      if (rol === 'Titular') side.tit.push(mon); else (rol === 'Baneado' ? side.bans : side.subs).push(mon);   // 2vs2 conjunto: 2 baneados y 2 suplentes por lado
     }
 
     // Resultados
@@ -211,7 +211,7 @@
     return DB;
   }
 
-  function newSide() { return { tit: [], ban: null, sub: null }; }
+  function newSide() { return { tit: [], bans: [], subs: [] }; }
 
   async function load() {
     if (!CFG.DATA_DIR && (!CFG.SHEET_ID || /PEGA_AQUI/.test(CFG.SHEET_ID))) throw new Error('Falta poner el ID del Google Sheet en js/config.js');
