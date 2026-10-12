@@ -36,14 +36,25 @@
     first: { grad: 'gRed', icon: '<text x="20" y="20.5" text-anchor="middle" font-family="\'Space Grotesk\', sans-serif" font-size="15" font-weight="700" fill="#12131C">1</text>', name: 'ALL-GBA 1st Team' },
     second: { grad: 'gViolet', icon: '<text x="20" y="20.5" text-anchor="middle" font-family="\'Space Grotesk\', sans-serif" font-size="15" font-weight="700" fill="#12131C">2</text>', name: 'ALL-GBA 2nd Team' }
   };
+  // Insignias en PNG (assets/insignias/<archivo>.png). Salen un 35 % más grandes que las dibujadas para que luzca el detalle.
+  // Si falta un PNG se usa la insignia dibujada de antes.
+  const BADGE_PNG = { mvp: 'mvp', asist: 'asistente', dpoy: 'dpoy', sexto: 'sexto', first: '1st-team', second: '2nd-team' };
+  const badgeMissing = {};
   function badge(type, size = 34, stacked = false, style = '') {
+    if (badgeMissing[type] || !BADGE_PNG[type]) return badgeSvg(type, size, stacked, style);
+    const px = Math.round(size * 1.35);
+    const m = (size - px) / 2;   // ocupa lo mismo que antes en la maqueta y sobresale un poco
+    return `<img src="${A}/insignias/${BADGE_PNG[type]}.png" alt="${esc(BADGE[type].name)}" onerror="badgeFail(this)" data-b="${type}|${size}|${stacked ? 1 : 0}|${esc(style)}" style="width: ${px}px; height: ${px}px; object-fit: contain; flex-shrink: 0; margin: ${m}px; ${style}${stacked ? ' filter: drop-shadow(-2px 0 1px rgba(0,0,0,0.55));' : ''}">`;
+  }
+  window.badgeFail = el => { const [t, sz, st, sty] = el.dataset.b.split('|'); badgeMissing[t] = true; el.outerHTML = badgeSvg(t, +sz, st === '1', sty); };
+  function badgeSvg(type, size = 34, stacked = false, style = '') {
     const b = BADGE[type];
     const stroke = stacked ? 'stroke="#1B1D2B" stroke-width="2"' : 'stroke="rgba(255,255,255,0.35)" stroke-width="1"';
     return `<svg width="${size}" height="${size}" viewBox="0 0 40 34" style="flex-shrink: 0; ${style}"><path d="M13 26 L20 22 L27 26 L25 33 L20 29 L15 33 Z" fill="url(#${b.grad})"/><circle cx="20" cy="15" r="13" fill="url(#${b.grad})" ${stroke}/>${b.icon}</svg>`;
   }
 
   /* ---------------- navegación (hash) ---------------- */
-  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '', pg: null, pr: { filter: 'all', type: '', dlg: null },
+  const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '', pg: null, ivOpen: false, recapJ: {}, sixBusy: false, sixMsg: '', pr: { filter: 'all', type: '', dlg: null },
     rw: { j: 1, view: null, team: null, ask: null, wheel: '1', rot: 0, spinning: false, draft: null, last: null, msg: '', done: '', busy: false, sure: false, genAsk: false } };
 
   function route() {
@@ -402,7 +413,7 @@
       </div>`).join('');
     const has = s.played > 0;
     const bal = (lab, v) => `<div style="display: flex; justify-content: space-between; font-size: 14px;"><span style="color: #9296AD;">${lab}</span><span style="font-weight: 600;">${has ? v : '—'}</span></div>`;
-    const rw = teamRewards(sig);   // recompensas de las ruletas (si la votación/recompensas están conectadas)
+    const rw = teamRecap(sig);   // Recap de la jornada: pokémon que llevó + recompensas de las ruletas
     return `
     <div style="margin: 0 64px ${rw ? 18 : 40}px; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; display: flex; gap: 32px;">
       <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; width: 180px; flex-shrink: 0;">
@@ -421,6 +432,7 @@
           <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;">${hall}</div>
         </div>
         ${medallas(sig)}
+        ${ivSection(sig)}
       </div>
       <div style="width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;">
         <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase;">Balance</div>
@@ -463,6 +475,98 @@
     </div>`;
   }
   window.toggleMed = () => { state.medOpen = !state.medOpen; render(); };
+  // Sección plegable "IVs ganados" de la ficha: IVs de premios de cada pokémon del equipo, de más a menos, sobre el tope de 40
+  function ivSection(sig) {
+    const rows = Object.values(ivTable(4)).filter(r => r.team === sig).sort((a, b) => (b.tot - a.tot) || (a.list[0].j - b.list[0].j));
+    const tot = rows.reduce((n, r) => n + r.tot, 0);
+    const open = state.ivOpen;
+    const sub = rows.length ? `${rows.length} pokémon · ${tot} IVs por premios${open ? '' : ' — toca para desplegar'}` : 'Los pokémon premiados en cada jornada ganan IVs';
+    const row = r => {
+      const full = r.tot >= 40;
+      const chips = r.list.map(x => {
+        const st = x.type === 'sexto' ? sixStats(x.j, r.team, r.poke) : null;
+        return ivChip(x.type, `J${x.j} · ${IV_SHORT[x.type]} +${x.iv}${st ? ' · 🎲 ' + esc(st.join('/')) : ''}`);
+      }).join('');
+      return `<div style="display: flex; align-items: center; gap: 14px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">
+        <img src="${sprite(r.poke)}" ${onErr} style="width: 44px; height: 44px; object-fit: contain; flex-shrink: 0;">
+        <div style="width: 130px; flex-shrink: 0; min-width: 0;"><div style="font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(monName(r))}</div>${r.nick ? `<div style="font-size: 10px; color: #9296AD;">${esc(pretty(r.poke))}</div>` : ''}</div>
+        <div style="flex: 1; display: flex; flex-wrap: wrap; gap: 6px;">${chips}</div>
+        <div style="width: 150px; flex-shrink: 0; display: flex; align-items: center; gap: 10px;">
+          <div style="flex: 1; height: 6px; border-radius: 3px; background: #232640; overflow: hidden;"><div style="width: ${Math.min(100, r.tot / 40 * 100).toFixed(0)}%; height: 100%; background: ${full ? '#E63946' : '#F5B700'};"></div></div>
+          <div style="width: 52px; text-align: right; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; white-space: nowrap; color: ${full ? '#E63946' : '#F4F1EA'};" title="${r.tot > 40 ? `Suman ${r.tot}, pero el tope es 40` : ''}">${Math.min(r.tot, 40)}<span style="color: #9296AD; font-weight: 500; font-size: 11px;"> / 40</span></div>
+        </div>
+        <span style="width: 34px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #E63946;">${full ? 'Tope' : ''}</span>
+      </div>`;
+    };
+    return `<div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: ${open ? 10 : 0}px;">
+      <div onclick="toggleIvs()" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+        <div style="font-size: 12px; color: ${open ? '#F5B700' : '#4A4E63'}; font-weight: 700;">${open ? '▾' : '▸'}</div>
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap;">IVs ganados</div>
+        <div style="font-size: 11px; color: #9296AD;">${sub}</div>
+      </div>
+      ${open ? `<div style="display: flex; flex-direction: column;">${rows.map(row).join('') || '<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">Ningún pokémon del equipo ha ganado IVs todavía</div>'}</div>
+      <div style="font-size: 11px; color: #9296AD;">Máx. 10 IVs en una misma stat por jornada · máx. 40 IVs por pokémon en toda la liga</div>` : ''}
+    </div>`;
+  }
+  window.toggleIvs = () => { state.ivOpen = !state.ivOpen; render(); };
+
+  // "Recap de la Jornada X" (debajo de la ficha): pokémon que llevó el equipo a esa jornada y recompensas que recibió
+  function recapHasData(j, sig) { return DB.enfs.some(e => e.j === j && e.combats.some(cb => ['Local', 'Visitante'].some(l => { const sd = cb.sides[l]; return [...sd.tit, ...sd.bans, ...sd.subs].some(m => m.team === sig && m.poke); }))); }
+  function teamRecap(sig) {
+    const avail = [1, 2, 3, 4].filter(j => (DB.jornadas[j - 1] && DB.jornadas[j - 1].done) || recapHasData(j, sig));
+    if (!avail.length) return '';
+    const done = avail.filter(j => DB.jornadas[j - 1] && DB.jornadas[j - 1].done);
+    let j = state.recapJ[sig];
+    if (!avail.includes(j)) j = done.length ? done[done.length - 1] : avail[avail.length - 1];
+    const isDone = !!(DB.jornadas[j - 1] && DB.jornadas[j - 1].done);
+    const st = (DB.stand[sig] && DB.stand[sig].byJ[j]) || { pts: 0, made: 0, recv: 0 };
+    const pos = voteOrder(j).indexOf(sig) + 1; const dif = st.made - st.recv;
+    const pills = [1, 2, 3, 4].map(x => {
+      const on = x === j, ok = avail.includes(x);
+      return `<div ${ok && !on ? `class="clickable" onclick="setRecap('${sig}', ${x})"` : ''} title="${ok ? '' : 'Jornada sin jugar'}" style="padding: 6px 14px; border-radius: 16px; font-size: 12px; font-weight: ${on ? 700 : 600}; ${on ? 'background: #F5B700; color: #12131C;' : ok ? 'background: #232640; color: #9296AD;' : 'background: #232640; color: #4A4E63;'}">J${x}</div>`;
+    }).join('');
+    const mons = ((voteCands(j).per || {})[sig] || []).slice().sort((a, b) => (b.kills - a.kills) || (b.combats - a.combats));
+    const aw = DB.awards.filter(a => a.j === j && a.team === sig);
+    const ORD = ['mvp', 'asist', 'dpoy', 'sexto', 'first', 'second'];
+    const card = m => {
+      const dim = !m.combats;
+      const my = aw.filter(a => String(a.poke).toLowerCase() === String(m.poke).toLowerCase()).map(a => a.type).sort((a, b) => ORD.indexOf(a) - ORD.indexOf(b));
+      const medals = my.map((t, i) => badge(t, 19, i > 0, i > 0 ? 'margin-left: -6px;' : '')).join('');
+      return `<div style="position: relative; background: #232640; border-radius: 10px; padding: 8px 6px 9px; display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center;${dim ? ' opacity: 0.55;' : ''}" title="${dim ? 'Lo llevó pero no llegó a jugar' : ''}">
+        ${medals ? `<div style="position: absolute; top: 6px; left: 6px; display: flex; align-items: center;">${medals}</div>` : ''}
+        <img src="${sprite(m.poke)}" ${onErr} style="width: 56px; height: 56px; object-fit: contain; margin-top: 6px;${dim ? ' filter: grayscale(60%);' : ''}">
+        <div style="font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;" title="${esc(pretty(m.poke))}">${esc(monName(m))}</div>
+        <div style="font-size: 10px; color: #9296AD;">${m.kills} kills · ${m.combats} ${m.combats === 1 ? 'combate' : 'combates'}</div>
+      </div>`;
+    };
+    let right = '';
+    if (VOTE_URL) {
+      voteLoad(false);
+      const got = rec() ? recGot(j, sig) : null;
+      right = `<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;"><div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700;">Recompensas</div>${got && pos ? `<div style="font-size: 11px; color: #9296AD; white-space: nowrap;">${planTxt(pos)} · ruleta · tier</div>` : ''}</div>
+        ${got ? got.rows.map(r => rewardRow(r)).join('') : `<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">${!rec() ? (VOTE.error ? 'No se ha podido conectar con el sheet' : 'Cargando…') : isDone ? 'Pendiente de tirar las ruletas' : 'Jornada sin terminar'}</div>`}
+      </div>`;
+    }
+    return `<div style="margin: 0 64px 40px; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 18px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+        <div style="display: flex; align-items: baseline; gap: 14px;">
+          <div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase;">Recap de la Jornada ${j}</div>
+          <div style="font-size: 12px; color: #9296AD;">${pos ? `${pos}º en la jornada · ` : ''}${st.pts} pts · ${dif > 0 ? '+' : dif < 0 ? '−' : ''}${Math.abs(dif)} KOs${isDone ? '' : ' · en curso'}</div>
+        </div>
+        <div style="display: flex; gap: 6px;">${pills}</div>
+      </div>
+      <div style="display: grid; grid-template-columns: ${right ? 'minmax(0, 2fr) minmax(0, 1fr)' : 'minmax(0, 1fr)'}; gap: 28px; align-items: start;">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; align-items: baseline; justify-content: space-between;"><div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700;">Pokémon que llevó</div><div style="font-size: 11px; color: #9296AD;">${mons.length} pokémon · kills y combates en la jornada</div></div>
+          ${mons.length ? `<div style="display: grid; grid-template-columns: repeat(${right ? 5 : 8}, minmax(0, 1fr)); gap: 10px;">${mons.map(card).join('')}</div>` : '<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">Todavía no hay combates apuntados</div>'}
+        </div>
+        ${right}
+      </div>
+    </div>`;
+  }
+  window.setRecap = (sig, j) => { state.recapJ[sig] = j; render(); };
+
 
   /* =====================================================================
      3 · CLASIFICACIÓN
@@ -949,6 +1053,67 @@
     return list;
   }
   const jList = js => { const u = [...new Set(js)].sort((a, b) => a - b); return u.length === 1 ? `Jornada ${u[0]}` : `Jornada ${u.slice(0, -1).join(', ')} y ${u[u.length - 1]}`; };
+  /* ---------------- IVs por premios de jornada ----------------
+     MVP, Asistente, DPOY y 6th: 12 IVs (MVP donde quiera, DPOY en HP/Def/SpD, Asistente en HP/Spe, 6th en 2 stats al azar).
+     ALL-GBA 1st Team: 8 IVs; 2nd Team: 4 IVs. Tope 40 IVs por pokémon en la liga. Los premios del Total no dan IVs. */
+  const IV_AWARD = { mvp: 12, asist: 12, dpoy: 12, sexto: 12, first: 8, second: 4 };
+  const IV_WHERE = { mvp: 'Donde quiera', asist: 'HP · Spe', dpoy: 'HP · Def · SpD', first: 'Donde quieran', second: 'Donde quieran' };
+  const IV_CHIP = { mvp: ['rgba(245,183,0,0.14)', '#F5B700'], asist: ['rgba(76,201,240,0.12)', '#4CC9F0'], dpoy: ['rgba(126,212,188,0.12)', '#7ED4BC'],
+    sexto: ['rgba(169,139,245,0.14)', '#C9B6FF'], first: ['rgba(245,183,0,0.10)', '#E9C46A'], second: ['rgba(146,150,173,0.14)', '#B9BCD6'] };
+  const IV_SHORT = { mvp: 'MVP', asist: 'Asistente', dpoy: 'DPOY', sexto: '6th', first: '1st Team', second: '2nd Team' };
+  const ivKey = (team, poke) => `${team}|${String(poke || '').toLowerCase()}`;
+  const ivChip = (type, txt) => `<span style="display: inline-block; padding: 3px 9px; border-radius: 10px; background: ${IV_CHIP[type][0]}; color: ${IV_CHIP[type][1]}; font-family: 'Space Grotesk', sans-serif; font-size: 11px; font-weight: 700; white-space: nowrap;">${txt}</span>`;
+  // Premios con IVs de cada pokémon (hasta la jornada upTo incluida): { key: { team, poke, nick, tot, list: [{ j, type, iv }] } }
+  function ivTable(upTo = 4) {
+    const t = {};
+    for (const a of DB.awards) {
+      if (a.j === 'T' || a.j > upTo || !IV_AWARD[a.type]) continue;
+      const k = ivKey(a.team, a.poke);
+      const r = t[k] || (t[k] = { team: a.team, poke: a.poke, nick: a.nick, tot: 0, list: [] });
+      if (a.nick && !r.nick) r.nick = a.nick;
+      r.tot += IV_AWARD[a.type]; r.list.push({ j: a.j, type: a.type, iv: IV_AWARD[a.type] });
+    }
+    const ord = Object.keys(IV_AWARD);
+    for (const r of Object.values(t)) r.list.sort((x, y) => (x.j - y.j) || (ord.indexOf(x.type) - ord.indexOf(y.type)));
+    return t;
+  }
+  // Stats sorteadas para el 6th Pokémon (las guarda el script del sheet)
+  const sixStats = (j, team, poke) => (VOTE.sexto && VOTE.sexto[`${j}|${team}|${String(poke || '').toLowerCase()}`]) || null;
+  window.drawSix = async (j, team, poke) => {
+    if (state.sixBusy) return;
+    if (!confirm(`¿Sortear ya las 2 stats del 6th Pokémon de la Jornada ${j}? El resultado queda guardado en el sheet y no se puede repetir.`)) return;
+    state.sixBusy = true; state.sixMsg = ''; render();
+    try {
+      const r = await fetch(VOTE_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'sorteo6', j: String(j), team, poke }) });
+      const d = await r.json(); if (!d || !d.ok) throw new Error((d && d.error) || 'El sheet no ha aceptado el sorteo');
+      VOTE.sexto = Object.assign({}, VOTE.sexto || {}, { [`${j}|${team}|${String(poke).toLowerCase()}`]: d.stats });
+      state.sixBusy = false; await voteLoad(true);
+    } catch (err) { state.sixBusy = false; state.sixMsg = 'No se ha podido sortear: ' + (err.message || 'error de conexión'); }
+    render();
+  };
+  // Pie de cada premio grande en la vista de una jornada: IVs, dónde van y lo que lleva acumulado ese pokémon
+  function ivFoot(type, w, j) {
+    const tab = ivTable(j); const r = tab[ivKey(w.team, w.poke)];
+    let where = `<span style="font-size: 11px; color: #D8D9E3; font-weight: 600; white-space: nowrap;">${IV_WHERE[type] || ''}</span>`;
+    if (type === 'sexto') {
+      const st = sixStats(j, w.team, w.poke);
+      if (st) where = `<span style="font-size: 11px; color: #D8D9E3; font-weight: 600; white-space: nowrap;" title="2 stats sorteadas entre HP, Atk, Def, SpA, SpD y Spe">🎲 ${esc(st.join(' · '))}</span>`;
+      else if (VOTE_URL && VOTE.data) {
+        return `<div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">${ivChip(type, `+${IV_AWARD[type]} IVs`)}<span style="font-size: 11px; color: #9296AD;">2 stats al azar</span></div>
+          <div class="clickable" onclick="drawSix(${j}, '${esc(w.team)}', '${esc(w.poke)}')" style="padding: 9px; border-radius: 10px; background: #F5B700; color: #12131C; text-align: center; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700;">${state.sixBusy ? 'Sorteando…' : '🎲 Sortear las 2 stats'}</div>
+          ${state.sixMsg ? `<div style="font-size: 10px; color: #E63946;">${esc(state.sixMsg)}</div>` : ''}
+        </div>`;
+      } else where = `<span style="font-size: 11px; color: #9296AD; white-space: nowrap;">2 stats al azar</span>`;
+    }
+    const perJ = {}; for (const x of (r ? r.list : [])) perJ[x.j] = (perJ[x.j] || 0) + x.iv;
+    const js = Object.keys(perJ);
+    const acc = r ? `Acumula <b style="color: ${r.tot >= 40 ? '#E63946' : '#F4F1EA'};">${Math.min(r.tot, 40)}</b> / 40${r.tot > 40 ? ' (tope)' : ''}${js.length > 1 ? ' · ' + js.map(x => `J${x} +${perJ[x]}`).join(' · ') : ''}` : '';
+    return `<div style="display: flex; flex-direction: column; gap: 5px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">${ivChip(type, `+${IV_AWARD[type]} IVs`)}${where}</div>
+      ${acc ? `<div style="font-size: 10px; color: #9296AD; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="IVs ganados por premios hasta la Jornada ${j}">${acc}</div>` : ''}
+    </div>`;
+  }
   function groupAwards(type, j) {
     const list = DB.awards.filter(a => a.type === type && a.j === j).sort((a, b) => a.n - b.n);
     const map = {}; const out = [];
@@ -1085,7 +1250,7 @@
             <div style="font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${esc(pretty(w.poke))}">${esc(monName(w))}</div>
             <div style="font-size: 10px; color: #9296AD; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(T(w.team).coach)} · ${esc(T(w.team).name)}</div>
           </div>
-        </div>`).join('') : `<div style="background: #232640; border-radius: 10px; padding: 10px; font-size: 12px; color: #4A4E63; min-height: 84px; display: flex; align-items: center; justify-content: center;">Sin asignar</div>`;
+        </div>${j !== 'T' ? ivFoot(type, w, j) : ''}`).join('') : `<div style="background: #232640; border-radius: 10px; padding: 10px; font-size: 12px; color: #4A4E63; min-height: 84px; display: flex; align-items: center; justify-content: center;">Sin asignar</div>`;
       return `<div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px;">
         <div style="display: flex; align-items: center; gap: 10px;">${badge(type, 34)}<div><div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 14px;">${b.name}</div><div style="font-size: 10px; color: #9296AD;">${b.sub}</div></div></div>
         ${rows}
@@ -1101,8 +1266,11 @@
             ${logo(w.team, 22, 'position: absolute; bottom: -4px; right: -4px; border: 2px solid #232640;')}
           </div>
           <div style="font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;" title="${esc(pretty(w.poke))}">${esc(monName(w))}</div>
+          ${ivs ? (r => r ? `<div style="font-size: 9px; color: #9296AD; margin-top: -2px;" title="IVs ganados por premios hasta la Jornada ${j}"><b style="color: ${r.tot >= 40 ? '#E63946' : r.tot > 8 ? '#F4F1EA' : '#9296AD'};">${Math.min(r.tot, 40)}</b> / 40 IVs</div>` : '')(ivs[ivKey(w.team, w.poke)]) : ''}
         </div>`).join('')}</div>`;
     };
+    const ivs = j !== 'T' ? ivTable(j) : null;
+    const ivHead = type => j !== 'T' ? `<div style="margin-left: auto; display: flex; align-items: center; gap: 8px;"><span style="font-size: 11px; color: #9296AD;">Donde quieran</span>${ivChip(type, `+${IV_AWARD[type]} IVs cada uno`)}</div>` : '';
     const scope = j !== 'T' ? `de la Jornada ${j}` : 'del reto';
     return `
     <div style="padding: 22px 64px 40px; display: flex; gap: 24px; align-items: flex-start;">
@@ -1116,13 +1284,13 @@
         <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${['mvp', 'asist', 'dpoy', 'sexto'].map(prizeCard).join('')}</div>
         <div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
           <div style="display: flex; flex-direction: column; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px;">${badge('first', 34)}<div><div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 14px;">ALL-GBA 1st Team</div><div style="font-size: 10px; color: #9296AD;">Selección de los 6 mejores pokémon ${scope}</div></div></div>
+            <div style="display: flex; align-items: center; gap: 10px;">${badge('first', 34)}<div><div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 14px;">ALL-GBA 1st Team</div><div style="font-size: 10px; color: #9296AD;">Selección de los 6 mejores pokémon ${scope}</div></div>${ivHead('first')}</div>
             ${teamGrid('first')}
           </div>
           <div style="display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.08);">
             <div onclick="toggleSecond()" class="clickable" style="display: flex; align-items: center; justify-content: space-between;">
               <div style="display: flex; align-items: center; gap: 10px;">${badge('second', 34)}<div><div style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 14px;">ALL-GBA 2nd Team</div><div style="font-size: 10px; color: #9296AD;">Los siguientes 6 mejores pokémon ${scope}</div></div></div>
-              <div style="color: #F5B700; font-size: 13px; font-weight: 700;">${state.secondOpen ? '▾' : '▸'}</div>
+              ${ivHead('second').replace('margin-left: auto;', 'margin-left: auto; margin-right: 10px;')}<div style="color: #F5B700; font-size: 13px; font-weight: 700;">${state.secondOpen ? '▾' : '▸'}</div>
             </div>
             ${state.secondOpen ? teamGrid('second') : ''}
           </div>
@@ -1137,7 +1305,7 @@
      (CFG.VOTE_URL). Si VOTE_URL está vacío, la web funciona como antes.
      ===================================================================== */
   const VOTE_URL = String(CFG.VOTE_URL || '').trim();
-  const VOTE = { data: null, rec: null, prog: null, prop: null, propAdmin: 'SSUR', loading: false, error: '', at: 0 };
+  const VOTE = { data: null, rec: null, prog: null, sexto: null, prop: null, propAdmin: 'SSUR', loading: false, error: '', at: 0 };
   const AWK = ['mvp', 'asist', 'dpoy', 'sexto', 'first', 'second'];
   const AWN = { mvp: 3, asist: 3, dpoy: 3, sexto: 3, first: 6, second: 6 };
   const sk = j => j === 'T' ? 'T' : String(j);
@@ -1153,7 +1321,7 @@
       const r = await fetch(VOTE_URL + (VOTE_URL.includes('?') ? '&' : '?') + 't=' + Date.now());
       const d = await r.json();
       if (!d || !d.ok) throw new Error((d && d.error) || 'respuesta no válida');
-      VOTE.data = d.scopes || {}; VOTE.rec = d.rec || null; VOTE.prog = d.prog || null; VOTE.prop = d.prop || null; VOTE.propAdmin = d.propAdmin || 'SSUR'; VOTE.error = ''; VOTE.detail = '';
+      VOTE.data = d.scopes || {}; VOTE.rec = d.rec || null; VOTE.prog = d.prog || null; VOTE.prop = d.prop || null; VOTE.sexto = d.sexto || {}; VOTE.propAdmin = d.propAdmin || 'SSUR'; VOTE.error = ''; VOTE.detail = '';
     } catch (err) { VOTE.error = 'No se ha podido conectar con la votación'; VOTE.detail = String((err && err.message) || ''); }
     VOTE.loading = false;
     if (state.tab === 'propuestas' && state.pr.dlg && state.pr.dlg.kind === 'new') return;   // no borrar lo que se está escribiendo
@@ -2017,24 +2185,6 @@
     });
     ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.lineWidth = 6; ctx.strokeStyle = '#F4F1EA'; ctx.stroke();
   }
-  // Bloque "Recompensas" de la ficha de un equipo: lo confirmado en cada jornada, con ruleta y tier
-  function teamRewards(sig) {
-    if (!VOTE_URL) return '';
-    voteLoad(false);
-    if (!rec()) return '';
-    const cols = [1, 2, 3, 4].map(j => {
-      const got = recGot(j, sig); const done = !!(DB.jornadas[j - 1] && DB.jornadas[j - 1].done); const pos = voteOrder(j).indexOf(sig) + 1;
-      return `<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0;">
-        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;"><div style="${SGF} font-size: 14px; font-weight: 700;">Jornada ${j}</div>${got ? `<div style="font-size: 11px; color: #9296AD; white-space: nowrap;">${pos}º · ${planTxt(pos)}</div>` : ''}</div>
-        ${got ? got.rows.map(r => rewardRow(r)).join('') : `<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">${done ? 'Pendiente de tirar las ruletas' : 'Jornada sin terminar'}</div>`}
-      </div>`;
-    }).join('');
-    return `<div style="margin: 0 64px 40px; ${RCARD} padding: 24px; display: flex; flex-direction: column; gap: 16px;">
-      <div style="display: flex; align-items: center; justify-content: space-between;"><div style="${SGF} font-size: 14px; font-weight: 700; color: #F5B700; letter-spacing: 1px; text-transform: uppercase;">Recompensas</div><div style="font-size: 11px; color: #9296AD;">Recompensa · ruleta de la que salió · tier</div></div>
-      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; align-items: start;">${cols}</div>
-    </div>`;
-  }
-
   /* =====================================================================
      6 · HISTORIA
      ===================================================================== */
