@@ -1086,6 +1086,8 @@
 
   const monKey = m => `${m.team}|${m.poke}|${m.nick}`;
   // mode 'tot' = kills totales · 'avg' = kills por combate (kills ÷ combates en los que ha participado como titular)
+  // Agrupa por equipo + especie (sin el mote): si un mote se escribe distinto en algún combate (p. ej. en el 2vs2) no se parte en dos filas.
+  // Se muestra el último mote apuntado.
   function killRanking(j, mode) {
     if (j === 'T') j = null;
     const map = {};
@@ -1093,8 +1095,9 @@
       if (j && e.j !== j) continue;
       for (const cb of e.combats) for (const lado of ['Local', 'Visitante']) for (const m of cb.sides[lado].tit) {
         if (!m.poke) continue;
-        const k = monKey(m);
+        const k = `${m.team}|${m.poke}`;
         const r = map[k] || (map[k] = { team: m.team, poke: m.poke, nick: m.nick, kills: 0, combats: 0 });
+        if (m.nick) r.nick = m.nick;
         r.kills += m.kills; r.combats++;
       }
     }
