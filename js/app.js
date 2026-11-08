@@ -55,7 +55,7 @@
 
   /* ---------------- navegación (hash) ---------------- */
   const state = { tab: 'inicio', team: null, clasJ: 1, jor: null, enf: null, combat: null, sideExpanded: false, ins: 'Total', killMode: 'tot', rules: 'Nuzlocke', galOpen: true, medOpen: false, secondOpen: true, spoiler: true, lastReveal: false, revealed: new Set(), voteView: null, voteTeam: null, voteAsk: null, voteJ: null, voteActive: 'mvp', ballot: null, voteMsg: '', voteSending: false, voteDone: '', pg: null, ivOpen: false, recapJ: {}, sixBusy: false, sixMsg: '', pr: { filter: 'all', type: '', dlg: null },
-    rw: { j: 1, view: null, team: null, ask: null, wheel: '1', rot: 0, spinning: false, draft: null, last: null, msg: '', done: '', busy: false, sure: false, genAsk: false } };
+    rw: { j: 1, view: null, team: null, ask: null, wheel: '1', rot: 0, spinning: false, draft: null, last: null, msg: '', done: '', busy: false, sure: false, genAsk: false, sw: null }, cl: null };
 
   function route() {
     const [tab, arg] = (location.hash.replace('#', '') || 'inicio').split('/');
@@ -81,7 +81,7 @@
     const app = document.getElementById('app');
     const fn = { inicio: renderInicio, equipos: renderEquipos, clasificacion: renderClasif, jornadas: renderJornadas, insignias: renderInsignias, recompensas: renderRecompensas, propuestas: renderPropuestas, historia: renderHistoria }[state.tab];
     app.innerHTML = fn();
-    if (state.tab === 'recompensas') rwDraw();
+    if (state.tab === 'recompensas') { rwDraw(); swDraw(); }
     if (state.tab === 'inicio') startCountdown();
   }
 
@@ -597,7 +597,7 @@
       const got = rec() ? recGot(j, sig) : null;
       right = `<div style="width: 360px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
         <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;"><div style="font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 700;">Recompensas</div>${got && pos ? `<div style="font-size: 11px; color: #9296AD; white-space: nowrap;">${planTxt(pos)} · ruleta · tier</div>` : ''}</div>
-        ${got ? got.rows.map(r => rewardRow(r)).join('') : `<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">${!rec() ? (VOTE.error ? 'No se ha podido conectar con el sheet' : 'Cargando…') : isDone ? 'Pendiente de tirar las ruletas' : 'Jornada sin terminar'}</div>`}
+        ${got ? gotRows(j, sig, got, false) : `<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">${!rec() ? (VOTE.error ? 'No se ha podido conectar con el sheet' : 'Cargando…') : isDone ? 'Pendiente de tirar las ruletas' : 'Jornada sin terminar'}</div>`}
       </div>`;
     }
     return `<div style="margin: 0 64px 40px; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 18px;">
@@ -1058,7 +1058,7 @@
     // Votación: pantalla de votar (jornada terminada, sin premios y sin revelar) o de votos revelados
     const view = !VOTE_URL || !VOTE.data ? null : (state.voteView === 'votar' && vote && !voteRevealed(j)) ? 'votar' : (state.voteView === 'votos' && voteRevealed(j)) ? 'votos' : null;
     const scopeTxt = isTotal ? 'del Total' : `de la Jornada ${j}`;
-    const sub = view === 'votar' ? `Votación ${scopeTxt} — elige tu equipo y reparte tus votos` : view === 'votos' ? `Votos ${scopeTxt} — así ha votado cada equipo` : vote ? `${isTotal ? 'Reto terminado' : 'Jornada terminada'} — todos los pokémon de un vistazo para votar los premios`
+    const sub = view === 'votar' ? `Votación ${scopeTxt} — elige tu equipo y reparte tus votos` : view === 'votos' ? ((isTotal ? hasAny : hasJ(j)) ? `Votos ${scopeTxt} — así ha votado cada equipo` : `Votos ${scopeTxt} — decidid los empates y cerrad los premios`) : vote ? `${isTotal ? 'Reto terminado' : 'Jornada terminada'} — todos los pokémon de un vistazo para votar los premios`
       : isTotal ? 'El escudo en la esquina de cada pokémon indica su equipo — sin necesidad de texto' : 'Vista filtrada por jornada — mismas categorías, solo los datos de esa jornada';
     const has = isTotal ? hasAny : hasJ(j);
     let content;
@@ -1600,33 +1600,77 @@
     const SGF = "font-family: 'Space Grotesk', sans-serif;";
     const votes = vs(j).votes || {}; const voters = DB.teamOrder.filter(t => votes[t]); const { byKey } = voteCands(j);
     const info = p => byKey[pickKey(p)] || p;
+    // Se pueden cerrar los premios desde aquí mientras la jornada (o el total) no tenga premios apuntados en el sheet
+    const canClose = !!VOTE_URL && !DB.awards.some(a => a.j === j);
+    const cl = canClose ? closeState(j) : null;
     const chip = (v, lab) => `<div title="${esc(v)}" style="display: flex; align-items: center; gap: 3px; background: #12131C; border-radius: 10px; padding: 2px 6px 2px 2px;">${logo(v, 16)}<span style="font-size: 10px; font-weight: 700; color: #D8D9E3;">${lab}</span></div>`;
     const tally = (awards, ptsOf, labOf) => {
       const map = {};
       for (const v of voters) for (const a of awards) ((votes[v] || {})[a] || []).forEach((p, i) => {
         if (!p || !p.poke) return;
-        const k = pickKey(p); const e = map[k] || (map[k] = { p: info(p), pts: 0, top: 0, votes: [] });
+        const k = pickKey(p); const e = map[k] || (map[k] = { key: k, p: info(p), pts: 0, top: 0, votes: [] });
         const pts = ptsOf(a, i); e.pts += pts; if (pts === ptsOf(awards[0], 0)) e.top++; e.votes.push([v, labOf(a, i)]);
       });
       return Object.values(map).sort((x, y) => (y.pts - x.pts) || (y.top - x.top) || monName(x.p).localeCompare(monName(y.p)));
     };
-    const card = a => {
+    const keyAttr = k => esc(k).replace(/'/g, '&#39;');
+
+    // ---- Premios individuales: el 1º se lleva el premio; si hay empate a puntos en el 1º, se elige a mano
+    const IND = ['mvp', 'asist', 'dpoy', 'sexto'];
+    const ind = {};
+    for (const a of IND) {
       const list = tally([a], (_, i) => 3 - i, (_, i) => `${i + 1}º`);
-      const rows = list.map((e, i) => `<div style="display: flex; align-items: center; gap: 10px; background: #232640; border-radius: 10px; padding: 6px 10px;">
-          <div style="${SGF} font-size: 13px; font-weight: 700; color: ${i === 0 ? '#F5B700' : '#9296AD'}; width: 14px;">${i + 1}</div>
+      const top = list.length ? list[0].pts : 0; const tied = list.filter(e => e.pts === top);
+      const need = tied.length > 1; const win = !list.length ? null : need ? (tied.find(e => e.key === (cl && cl.pick[a])) || null) : tied[0];
+      ind[a] = { list, top, tied, need, win };
+    }
+    // ---- ALL-GBA: corte del 1st Team (6) y del 2nd Team (6 siguientes); los empates en el corte se eligen a mano
+    const gba = tally(['first', 'second'], a => a === 'first' ? 2 : 1, a => a === 'first' ? '1st' : '2nd');
+    const cut = (list, slots, chosen) => {
+      if (slots <= 0) return { fixed: [], tie: [], left: 0, sel: [], rest: list, pending: false, p: 0 };
+      if (list.length <= slots) return { fixed: list, tie: [], left: 0, sel: [], rest: [], pending: false, p: 0, short: slots - list.length };
+      const p = list[slots - 1].pts; const fixed = list.filter(e => e.pts > p); const tie = list.filter(e => e.pts === p); const left = slots - fixed.length;
+      if (tie.length === left) return { fixed: fixed.concat(tie), tie: [], left: 0, sel: [], rest: list.filter(e => e.pts < p), pending: false, p };
+      const sel = tie.filter(e => (chosen || []).includes(e.key)).slice(0, left);
+      return { fixed, tie, left, sel, rest: tie.filter(e => !sel.includes(e)).concat(list.filter(e => e.pts < p)), pending: sel.length < left, p };
+    };
+    const c1 = cut(gba, 6, cl && cl.in1);
+    const losers = c1.tie.length ? c1.tie.length - c1.left : 0;   // los del empate del corte del 1st que no entran pasan al 2nd Team
+    const lower = c1.tie.length ? gba.filter(e => e.pts < c1.p) : c1.rest;
+    const c2 = cut(lower, 6 - Math.min(losers, 6), cl && cl.in2);
+    const team1 = c1.fixed.concat(c1.sel);
+    const tieLosers = c1.tie.length && !c1.pending ? c1.tie.filter(e => !c1.sel.includes(e)) : [];
+    const team2 = (c1.tie.length ? tieLosers : []).concat(c2.fixed, c2.sel);
+    const others = c2.tie.length ? (c2.pending ? [] : c2.tie.filter(e => !c2.sel.includes(e))).concat(lower.filter(e => e.pts < c2.p)) : c2.rest;   // con el empate sin decidir, sus candidatos solo salen en el recuadro del empate
+    const pending = IND.filter(a => ind[a].need && !ind[a].win).length + (c1.pending ? 1 : 0) + (c2.pending ? 1 : 0);
+    const short = IND.some(a => !ind[a].list.length) || !!c1.short || !!c2.short;
+
+    const radio = (a, e, on) => `<button type="button" class="clickable" onclick="clPick('${a}', '${keyAttr(e.key)}')" aria-label="Elegir a ${esc(monName(e.p))} como ${esc(BADGE[a].name)}" aria-pressed="${on}" style="width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; border: 2px solid #F5B700; background: ${on ? '#F5B700' : 'transparent'}; padding: 0; display: flex; align-items: center; justify-content: center; color: #12131C; font-size: 13px; font-weight: 700;">${on ? '✓' : ''}</button>`;
+    const indRow = (a, e, i, tieMode) => {
+      const gold = tieMode || i === 0;
+      return `<div style="display: flex; align-items: center; gap: 10px; background: #232640; border-radius: 10px; padding: 6px 10px;">
+          <div style="${SGF} font-size: 13px; font-weight: 700; color: ${gold ? '#F5B700' : '#9296AD'}; width: 14px;">${tieMode ? 1 : i + 1}</div>
           <div style="position: relative; width: 48px; height: 48px; flex-shrink: 0;"><img src="${sprite(e.p.poke)}" ${onErr} style="width: 48px; height: 48px; object-fit: contain;">${logo(e.p.team, 18, 'position: absolute; bottom: -3px; right: -3px; border: 2px solid #232640;')}</div>
           <div style="flex: 1; min-width: 0;">
             <div style="font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${esc(pretty(e.p.poke))}">${esc(monName(e.p))}</div>
-            <div style="display: flex; gap: 4px; margin-top: 4px;">${e.votes.map(v => chip(v[0], v[1])).join('')}</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">${e.votes.map(v => chip(v[0], v[1])).join('')}</div>
           </div>
-          <div style="text-align: right; white-space: nowrap;"><span style="${SGF} font-size: 18px; font-weight: 700;${i === 0 ? ' color: #F5B700;' : ''}">${e.pts}</span> <span style="font-size: 10px; color: #9296AD;">pts</span></div>
-        </div>`).join('') || '<div style="font-size: 12px; color: #4A4E63;">Sin votos</div>';
+          ${tieMode ? radio(a, e, ind[a].win === e) : ''}
+          <div style="text-align: right; white-space: nowrap;"><span style="${SGF} font-size: 18px; font-weight: 700;${gold ? ' color: #F5B700;' : ''}">${e.pts}</span> <span style="font-size: 10px; color: #9296AD;">pts</span></div>
+        </div>`;
+    };
+    const card = a => {
+      const { list, tied, need, top } = ind[a]; const tieMode = !!cl && need;
+      const rest = tieMode ? list.slice(tied.length) : list;
+      const rows = (tieMode ? `<div style="border: 1px dashed rgba(245,183,0,0.6); background: rgba(245,183,0,0.06); border-radius: 12px; padding: 8px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="${SGF} font-size: 11px; font-weight: 700; color: #F5B700; padding: 0 2px;">Empate a ${top} pts por el 1º · elige quién gana</div>
+            ${tied.map(e => indRow(a, e, 0, true)).join('')}
+          </div>` : '') + rest.map((e, i) => indRow(a, e, tieMode ? i + tied.length : i, false)).join('');
       return `<div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 8px;">
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">${badge(a, 34)}<div><div style="${SGF} font-weight: 700; font-size: 14px;">${BADGE[a].name}</div><div style="font-size: 10px; color: #9296AD;">${BADGE[a].sub}</div></div></div>
-        ${rows}
+        ${rows || '<div style="font-size: 12px; color: #4A4E63;">Sin votos</div>'}
       </div>`;
     };
-    const gba = tally(['first', 'second'], a => a === 'first' ? 2 : 1, a => a === 'first' ? '1st' : '2nd');
     const gtile = e => `<div style="background: #232640; border-radius: 10px; padding: 10px; display: flex; align-items: center; gap: 10px; min-width: 0;">
         <div style="position: relative; width: 56px; height: 56px; flex-shrink: 0;"><img src="${sprite(e.p.poke)}" ${onErr} style="width: 56px; height: 56px; object-fit: contain;">${logo(e.p.team, 20, 'position: absolute; bottom: -3px; right: -3px; border: 2px solid #232640;')}</div>
         <div style="flex: 1; min-width: 0;">
@@ -1637,31 +1681,118 @@
           <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px;">${e.votes.map(v => chip(v[0], v[1])).join('')}</div>
         </div>
       </div>`;
-    const tieAt = n => gba.length > n && gba[n - 1].pts === gba[n].pts;
-    const gblock = (a, sub, items, tie) => `<div style="display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; align-items: center; gap: 10px;">${badge(a, 30)}<div><div style="${SGF} font-weight: 700; font-size: 14px;">${BADGE[a].name}</div><div style="font-size: 10px; color: #9296AD;">${sub}${tie ? ' · <span style="color: #F5B700; font-weight: 700;">hay empate a puntos en el corte: lo decidís vosotros</span>' : ''}</div></div></div>
-        <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px;">${items.map(gtile).join('') || '<div style="font-size: 12px; color: #4A4E63;">Sin votos</div>'}</div>
+    const slot = (a, b) => `<div style="border: 1px dashed rgba(245,183,0,0.55); border-radius: 10px; padding: 10px; min-height: 76px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center;"><div style="${SGF} font-size: 12px; font-weight: 700; color: #F5B700;">${a}</div><div style="font-size: 10px; color: #9296AD;">${b}</div></div>`;
+    const ghead = (a, sub, tie) => `<div style="display: flex; align-items: center; gap: 10px;">${badge(a, 30)}<div><div style="${SGF} font-weight: 700; font-size: 14px;">${BADGE[a].name}</div><div style="font-size: 10px; color: #9296AD;">${sub}${tie ? ' · <span style="color: #F5B700; font-weight: 700;">hay empate a puntos en el corte: lo decidís vosotros</span>' : ''}</div></div></div>`;
+    const ggrid = items => `<div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px;">${items.join('') || '<div style="font-size: 12px; color: #4A4E63;">Sin votos</div>'}</div>`;
+    const tiebox = (which, c, title, sub, lab) => `<div style="border: 1px dashed rgba(245,183,0,0.6); background: rgba(245,183,0,0.06); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: baseline; gap: 10px;"><div style="${SGF} font-size: 13px; font-weight: 700; color: #F5B700;">${title}</div><div style="font-size: 11px; color: #9296AD;">${sub}</div></div>
+        ${ggrid(c.tie.map(e => { const on = c.sel.includes(e); return `<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">${gtile(e)}<button type="button" class="clickable" onclick="clCut(${which}, '${keyAttr(e.key)}', ${c.left})" aria-pressed="${on}" style="padding: 7px 10px; border-radius: 10px; border: 1px solid rgba(245,183,0,0.6); background: ${on ? '#F5B700' : 'transparent'}; color: ${on ? '#12131C' : '#F5B700'}; ${SGF} font-size: 12px; font-weight: 700;">${on ? `✓ ${lab.replace('Al ', 'En el ')}` : lab}</button></div>`; }))}
       </div>`;
-    const rest = gba.slice(12);
+    const plural = (n, a, b) => n === 1 ? a : b;
+    let gbaHtml;
+    if (cl) {
+      const g1 = team1.map(gtile).concat(Array.from({ length: Math.max(0, c1.left - c1.sel.length) }, () => slot('Plaza por decidir', `empate a ${c1.p} pts`)));
+      const g2 = (c1.tie.length && c1.pending ? Array.from({ length: Math.min(losers, 6) }, (_, i) => slot('Del empate de arriba', i === 0 ? `${plural(losers, 'el que no entre', `los ${losers} que no entren`)}` : '')) : tieLosers.slice(0, 6).map(gtile))
+        .concat(c2.fixed.map(gtile), c2.sel.map(gtile), Array.from({ length: Math.max(0, c2.left - c2.sel.length) }, () => slot('Plaza por decidir', `empate a ${c2.p} pts`)));
+      gbaHtml = `<div style="display: flex; flex-direction: column; gap: 10px;">${ghead('first', 'Los 6 pokémon con más puntos · voto al 1st Team = 2 pts, voto al 2nd Team = 1 pt', false)}${ggrid(g1)}</div>
+        ${c1.tie.length ? tiebox(1, c1, `Empate a ${c1.p} pts en el corte del 1st Team`, `${c1.left} ${plural(c1.left, 'plaza', 'plazas')} para ${c1.tie.length} pokémon · marca ${plural(c1.left, 'quién entra', 'quiénes entran')}; ${plural(losers, 'el otro pasa', `los otros ${losers} pasan`)} al 2nd Team`, 'Al 1st Team') : ''}
+        <div style="border-top: 1px solid rgba(255,255,255,0.08);"></div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">${ghead('second', 'Los 6 siguientes', false)}${ggrid(g2)}</div>
+        ${c2.tie.length ? tiebox(2, c2, `Empate a ${c2.p} pts en el corte del 2nd Team`, `${c2.left} ${plural(c2.left, 'plaza', 'plazas')} para ${c2.tie.length} pokémon · marca ${plural(c2.left, 'quién entra', 'quiénes entran')}`, 'Al 2nd Team') : ''}
+        ${others.length ? `<div style="font-size: 11px; color: #9296AD;"><span style="font-weight: 700; color: #D8D9E3;">También con votos:</span> ${others.map(e => `${esc(monName(e.p))} (${e.pts})`).join(' · ')}</div>` : ''}`;
+    } else {
+      const tieAt = n => gba.length > n && gba[n - 1].pts === gba[n].pts;
+      const rest = gba.slice(12);
+      gbaHtml = `<div style="display: flex; flex-direction: column; gap: 10px;">${ghead('first', 'Los 6 pokémon con más puntos · voto al 1st Team = 2 pts, voto al 2nd Team = 1 pt', tieAt(6))}${ggrid(gba.slice(0, 6).map(gtile))}</div>
+        <div style="border-top: 1px solid rgba(255,255,255,0.08);"></div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">${ghead('second', 'Los 6 siguientes', tieAt(12))}${ggrid(gba.slice(6, 12).map(gtile))}</div>
+        ${rest.length ? `<div style="font-size: 11px; color: #9296AD;"><span style="font-weight: 700; color: #D8D9E3;">También con votos:</span> ${rest.map(e => `${esc(monName(e.p))} (${e.pts})`).join(' · ')}</div>` : ''}`;
+    }
+
+    // ---- Botón "Cerrar premios" y confirmación
+    let closeBtn = '', modal = '';
+    if (cl) {
+      const ready = !pending && !short;
+      const lab = short ? 'Cerrar premios · faltan votos' : pending ? `Cerrar premios · ${plural(pending, 'falta 1 empate', `faltan ${pending} empates`)}` : 'Cerrar premios';
+      closeBtn = `<button type="button" ${ready ? 'class="clickable" onclick="clAsk(true)"' : 'disabled'} style="margin-left: 12px; padding: 9px 18px; border-radius: 20px; ${ready ? 'border: none; background: #F5B700; color: #12131C;' : 'border: 1px solid rgba(245,183,0,0.5); background: #232640; color: #F5B700; cursor: default;'} ${SGF} font-size: 13px; font-weight: 700; white-space: nowrap;">${lab}</button>`;
+      if (cl.ask && ready) {
+        cl.final = { ind: Object.fromEntries(IND.map(a => [a, ind[a].win])), first: team1, second: team2 };
+        const TAG = '<span style="display: inline-block; margin-top: 3px; padding: 1px 6px; border-radius: 8px; background: rgba(245,183,0,0.14); color: #F5B700; font-size: 9px; font-weight: 700;">empate elegido</span>';
+        const tieFirst = new Set(c1.sel), tieSecond = new Set(c2.sel.concat(tieLosers));
+        const award = a => { const e = ind[a].win; return `<div style="background: #232640; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 8px;">${badge(a, 34)}<div><div style="${SGF} font-size: 13px; font-weight: 700;">${BADGE[a].name}</div><div style="font-size: 10px; color: #9296AD;">${BADGE[a].sub}</div></div></div>
+            <div style="display: flex; align-items: center; gap: 10px;"><div style="position: relative; width: 52px; height: 52px; flex-shrink: 0;"><img src="${sprite(e.p.poke)}" ${onErr} style="width: 52px; height: 52px; object-fit: contain;">${logo(e.p.team, 20, 'position: absolute; bottom: -3px; right: -3px; border: 2px solid #232640;')}</div>
+            <div style="min-width: 0;"><div style="font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(monName(e.p))}</div>${ind[a].need ? TAG : ''}</div></div></div>`; };
+        const mini = (e, tag) => `<div style="background: #232640; border-radius: 10px; padding: 8px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; min-width: 0;">
+            <div style="position: relative; width: 48px; height: 48px;"><img src="${sprite(e.p.poke)}" ${onErr} style="width: 48px; height: 48px; object-fit: contain;">${logo(e.p.team, 18, 'position: absolute; bottom: -3px; right: -3px; border: 2px solid #232640;')}</div>
+            <div style="font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;">${esc(monName(e.p))}</div>${tag ? TAG : ''}</div>`;
+        const tm = (a, list, tags) => `<div style="display: flex; flex-direction: column; gap: 8px;"><div style="display: flex; align-items: center; gap: 8px;">${badge(a, 30)}<div style="${SGF} font-size: 13px; font-weight: 700;">${BADGE[a].name}</div></div>
+            <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px;">${list.map(e => mini(e, tags.has(e))).join('')}</div></div>`;
+        modal = `<div onclick="clAsk(false)" style="position: fixed; inset: 0; z-index: 50; background: rgba(10,11,18,0.78); display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;">
+          <div role="dialog" aria-label="Cerrar los premios" onclick="event.stopPropagation()" style="width: 860px; max-width: 100%; max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 26px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">
+            <div>
+              <div style="${SGF} font-size: 22px; font-weight: 700;">¿Cerrar los premios ${j === 'T' ? 'del Total' : `de la Jornada ${j}`}?</div>
+              <div style="font-size: 12px; color: #9296AD; margin-top: 4px; line-height: 1.5;">Así quedan con los empates que habéis elegido. Se apuntan en la pestaña Insignias del sheet y aparecen en la web${j === 'T' ? '' : ' (con sus IVs)'}. Si luego hay que corregir algo, se hace en el sheet.</div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;">${IND.map(award).join('')}</div>
+            ${tm('first', team1, tieFirst)}
+            ${tm('second', team2, tieSecond)}
+            ${cl.msg ? `<div style="font-size: 12px; color: #E63946;">${esc(cl.msg)}</div>` : ''}
+            <div style="display: flex; gap: 10px; margin-top: 4px;">
+              <button type="button" class="clickable" onclick="clAsk(false)" style="flex: 1; padding: 12px; border: none; border-radius: 12px; background: #232640; color: #D8D9E3; ${SGF} font-size: 14px; font-weight: 700;">Cancelar</button>
+              <button type="button" ${cl.busy ? 'disabled' : 'class="clickable" onclick="clSend()"'} style="flex: 1.6; padding: 12px; border: none; border-radius: 12px; background: ${cl.busy ? '#232640' : '#F5B700'}; color: ${cl.busy ? '#4A4E63' : '#12131C'}; ${SGF} font-size: 14px; font-weight: 700;">${cl.busy ? 'Cerrando…' : 'Sí, cerrar premios'}</button>
+            </div>
+          </div>
+        </div>`;
+      }
+    }
     return `<div style="padding: 22px 64px 40px; display: flex; flex-direction: column; gap: 16px;">
       <div style="background: rgba(76,201,240,0.08); border: 1px solid rgba(76,201,240,0.35); border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
         <div style="display: flex; align-items: center; gap: 12px;">
           <div style="font-size: 20px;">🗳️</div>
           <div>
             <div style="${SGF} font-size: 14px; font-weight: 700; color: #4CC9F0;">Votos ${j === 'T' ? 'del Total' : `de la Jornada ${j}`} revelados · han votado los ${voters.length} equipos</div>
-            <div style="font-size: 11px; color: #9296AD; margin-top: 2px;">Premios individuales: 1º = 3 pts, 2º = 2, 3º = 1. Esto es solo el recuento: los premios definitivos los decidís vosotros y se apuntan en la pestaña Insignias del sheet.</div>
+            <div style="font-size: 11px; color: #9296AD; margin-top: 2px;">${cl ? 'Premios individuales: 1º = 3 pts, 2º = 2, 3º = 1. Si hay empate a puntos en un puesto con premio, se elige a mano. Al pulsar «Cerrar premios» los ganadores se apuntan en la pestaña Insignias del sheet.' : 'Premios individuales: 1º = 3 pts, 2º = 2, 3º = 1. Esto es solo el recuento: los premios definitivos ya están apuntados en la pestaña Insignias del sheet.'}</div>
           </div>
         </div>
-        <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">${voters.map(v => logo(v, 28, 'border: 2px solid #4CC9F0;')).join('')}<div class="clickable" onclick="voteClose()" style="font-size: 12px; font-weight: 600; color: #9296AD; margin-left: 12px; white-space: nowrap;">← Volver</div></div>
+        <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">${voters.map(v => logo(v, 28, 'border: 2px solid #4CC9F0;')).join('')}${closeBtn}<div class="clickable" onclick="voteClose()" style="font-size: 12px; font-weight: 600; color: #9296AD; margin-left: 12px; white-space: nowrap;">← Volver</div></div>
       </div>
-      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${['mvp', 'asist', 'dpoy', 'sexto'].map(card).join('')}</div>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${IND.map(card).join('')}</div>
       <div style="background: #1B1D2B; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 18px;">
-        ${gblock('first', 'Los 6 pokémon con más puntos · voto al 1st Team = 2 pts, voto al 2nd Team = 1 pt', gba.slice(0, 6), tieAt(6))}
-        <div style="border-top: 1px solid rgba(255,255,255,0.08);"></div>
-        ${gblock('second', 'Los 6 siguientes', gba.slice(6, 12), tieAt(12))}
-        ${rest.length ? `<div style="font-size: 11px; color: #9296AD;"><span style="font-weight: 700; color: #D8D9E3;">También con votos:</span> ${rest.map(e => `${esc(monName(e.p))} (${e.pts})`).join(' · ')}</div>` : ''}
+        ${gbaHtml}
       </div>
-    </div>`;
+    </div>${modal}`;
+  }
+  // Estado del cierre de premios (empates elegidos a mano), por jornada
+  function closeState(j) { if (!state.cl || state.cl.j !== j) state.cl = { j, pick: {}, in1: [], in2: [], ask: false, busy: false, msg: '', final: null }; return state.cl; }
+  window.clPick = (a, key) => { const cl = state.cl; if (!cl || cl.busy) return; cl.pick[a] = key; render(); };
+  window.clCut = (which, key, left) => {
+    const cl = state.cl; if (!cl || cl.busy) return; const k = which === 1 ? 'in1' : 'in2'; const arr = cl[k];
+    const i = arr.indexOf(key);
+    if (i >= 0) arr.splice(i, 1); else { arr.push(key); while (arr.length > left) arr.shift(); }
+    if (which === 1) cl.in2 = [];   // si cambia el corte del 1st, el del 2nd se vuelve a elegir
+    render();
+  };
+  window.clAsk = on => { const cl = state.cl; if (!cl || cl.busy) return; cl.ask = !!on; cl.msg = ''; render(); };
+  window.clSend = async () => {
+    const cl = state.cl; if (!cl || cl.busy || !cl.final) return;
+    const obj = e => ({ team: e.p.team, poke: e.p.poke, nick: e.p.nick || '' });
+    const f = cl.final; const awards = { first: f.first.map(obj), second: f.second.map(obj) };
+    for (const a of ['mvp', 'asist', 'dpoy', 'sexto']) awards[a] = [obj(f.ind[a])];
+    cl.busy = true; cl.msg = ''; render();
+    try { await recPost({ action: 'premios', scope: sk(cl.j), awards }); }
+    catch (err) { cl.busy = false; cl.msg = 'No se han podido cerrar los premios: ' + (err.message || 'error de conexión'); render(); return; }
+    const j = cl.j; state.cl = null; state.voteView = null; state.voteDone = `Premios ${j === 'T' ? 'del Total' : `de la Jornada ${j}`} cerrados`;
+    window.scrollTo(0, 0); await reloadDB(() => DB.awards.some(a => a.j === j));
+  };
+  // Vuelve a leer el sheet (p. ej. tras cerrar los premios). Google tarda unos segundos en servir lo nuevo: reintenta hasta que se cumpla "ok"
+  async function reloadDB(ok) {
+    for (let n = 0; n < 6; n++) {
+      try { const nd = await window.RetoData.load(); DB = nd; window.__DB = DB; } catch (err) { /* se reintenta */ }
+      if (!ok || ok()) break;
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    render();
   }
 
   /* =====================================================================
@@ -1687,7 +1818,8 @@
   const rec = () => VOTE.rec || null;
   const recWheels = j => { const r = rec(); return r && r.wheels && r.wheels[String(j)] ? r.wheels[String(j)] : null; };
   const recGot = (j, team) => { const r = rec(); const x = r && r.rewards && r.rewards[String(j)]; return x && x[team] ? x[team] : null; };
-  const recGlobal = j => { const r = rec(); return (r && r.global && r.global[String(j)]) || ''; };
+  // Recompensas globales de la jornada: pueden ser varias (en el sheet, separadas por ;)
+  const recGlobals = j => { const r = rec(); const g = r && r.global && r.global[String(j)]; return (Array.isArray(g) ? g : String(g || '').split(/\s*[;\n]\s*/)).map(x => String(x).trim()).filter(Boolean); };
   // Recompensas por tier de una jornada: si ya tiene ruletas, las de sus ruletas (no cambia aunque luego se edite el sheet); si no, las del sheet
   function recPool(j) {
     const out = { 1: [], 2: [], 3: [], 4: [] }; const w = recWheels(j);
@@ -1729,7 +1861,7 @@
   function draftLoad(j, team) {
     try { const d = JSON.parse(localStorage.getItem(rwKey(j, team)) || 'null'); if (d && Array.isArray(d.rows)) return d; } catch (e) { /* nada */ }
     const got = recGot(j, team);   // equipo ya confirmado: se parte de lo confirmado para poder corregirlo
-    if (got) return { rows: got.rows.filter(r => r.kind !== 'global').map(r => ({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind === 'aleatoria' ? 'aleatoria' : 'elegida', boost: !!r.boost })), pending: null, boost: false };
+    if (got) return { rows: got.rows.filter(r => r.kind !== 'global').map(r => ({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind === 'aleatoria' ? 'aleatoria' : 'elegida', boost: !!r.boost, swap: r.swap || null })), pending: null, boost: false };
     return newDraft();
   }
   const draftSave = () => { const s = state.rw; if (!s.team) return; try { localStorage.setItem(rwKey(s.j, s.team), JSON.stringify(s.draft)); } catch (e) { /* nada */ } };
@@ -1831,9 +1963,8 @@
     const s = state.rw; if (s.busy || s.spinning || !s.draft.rows.length) return;
     const pos = voteOrder(s.j).indexOf(s.team) + 1; const { nc, nr } = rwCounts(s.draft); const [pc, pr] = RW_PLAN[pos];
     if ((nc !== pc || nr !== pr || s.draft.pending || s.draft.boost) && !s.sure) { s.sure = true; render(); return; }
-    const g = recGlobal(s.j); const rows = [];
-    if (g) rows.push({ label: g, tier: tierOf(s.j, g), wheel: '', kind: 'global', boost: false });
-    for (const r of s.draft.rows) rows.push({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind, boost: !!r.boost });
+    const rows = recGlobals(s.j).map(g => ({ label: g, tier: tierOf(s.j, g), wheel: '', kind: 'global', boost: false }));
+    for (const r of s.draft.rows) rows.push({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind, boost: !!r.boost, swap: r.swap || null });
     s.busy = true; s.msg = ''; render();
     try {
       await recPost({ action: 'recompensas', scope: String(s.j), team: s.team, rows });
@@ -1847,23 +1978,44 @@
   const wchip = txt => `<span style="display: inline-block; padding: 3px 9px; border-radius: 10px; background: #12131C; border: 1px solid rgba(255,255,255,0.12); color: #D8D9E3; ${SGF} font-size: 11px; font-weight: 700; white-space: nowrap;">${esc(txt)}</span>`;
   const BOOSTCHIP = `<span style="display: inline-block; padding: 2px 7px; border-radius: 8px; background: #E63946; color: #F4F1EA; ${SGF} font-size: 10px; font-weight: 700; margin-right: 6px; vertical-align: 1px;">BOOST +</span>`;
   const eyebrow = (t, sub = '') => `<div style="display: flex; align-items: baseline; gap: 10px;"><div style="${SGF} font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #F5B700; white-space: nowrap;">${t}</div><div style="font-size: 11px; color: #9296AD;">${sub}</div></div>`;
-  function rewardRow(r, del) {
-    const where = r.kind === 'global' ? 'Global' : `Ruleta ${r.wheel}`;
-    const extra = r.kind === 'global' ? 'Recompensa global de la jornada' : r.kind === 'aleatoria' ? 'Tirada aleatoria' : '';
+  const CAMBCHIP = `<span style="display: inline-block; padding: 2px 7px; border-radius: 8px; background: #4CC9F0; color: #12131C; ${SGF} font-size: 10px; font-weight: 700; margin-right: 6px; vertical-align: 1px;">CAMBIADA</span>`;
+  function rewardRow(r, del, act = '') {
+    const sw = r.swap;
+    const where = r.kind === 'global' ? 'Global' : sw ? 'Cambio' : `Ruleta ${r.wheel}`;
+    const extra = sw ? `Cambio por tier inferior · antes: ${esc(sw.label)}${sw.tier ? ` (Tier ${sw.tier})` : ''}` : r.kind === 'global' ? 'Recompensa global de la jornada' : r.kind === 'aleatoria' ? 'Tirada aleatoria' : '';
     const x = del !== undefined ? `<div class="clickable" onclick="rwDelete(${del})" title="Eliminar esta recompensa y repetir la tirada" style="width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(230,57,70,0.5); color: #E63946; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">✕</div>` : '';
-    return `<div style="display: flex; align-items: center; gap: 10px; background: #232640; border-radius: 10px; padding: 9px 12px;">
-        <div style="flex: 1; min-width: 0;"><div style="font-size: 14px; font-weight: 700;">${r.boost ? BOOSTCHIP : ''}${esc(r.label)}</div>${extra ? `<div style="font-size: 10px; color: #9296AD; margin-top: 2px;">${extra}</div>` : ''}</div>
+    return `<div style="display: flex; align-items: center; gap: 10px; background: #232640; border-radius: 10px; padding: 9px 12px;${sw ? ' border: 1px solid rgba(76,201,240,0.45);' : ''}">
+        <div style="flex: 1; min-width: 0;"><div style="font-size: 14px; font-weight: 700;">${sw ? CAMBCHIP : ''}${r.boost ? BOOSTCHIP : ''}${esc(r.label)}</div>${extra ? `<div style="font-size: 10px; color: #9296AD; margin-top: 2px;">${extra}</div>` : ''}${act ? `<div style="margin-top: 5px;">${act}</div>` : ''}</div>
         ${wchip(where)}${r.tier >= 1 && r.tier <= 4 ? tchip(r.tier) : ''}${x}
       </div>`;
   }
+  // Varias recompensas globales: una sola fila con todas (si solo hay una, fila normal)
+  function globalsRow(list) {
+    if (!list.length) return '';
+    if (list.length === 1) return rewardRow(list[0]);
+    return `<div style="display: flex; align-items: center; gap: 10px; background: #232640; border-radius: 10px; padding: 9px 12px;">
+        <div style="flex: 1; min-width: 0;"><div style="font-size: 14px; font-weight: 700;">Recompensas globales</div><div style="font-size: 10px; color: #9296AD; margin-top: 2px;">${list.map(r => esc(r.label)).join(' · ')}</div></div>
+        ${wchip('Global')}
+      </div>`;
+  }
+  // Recompensas confirmadas de un equipo; con canSwap, cada una de tier 1-3 lleva "↓ Cambiar"
+  const swapUsed = got => !!(got && got.rows.some(r => r.swap));
+  function gotRows(j, team, got, canSwap) {
+    const glob = got.rows.filter(r => r.kind === 'global'), rest = got.rows.filter(r => r.kind !== 'global');
+    return globalsRow(glob) + rest.map(r => rewardRow(r, undefined, canSwap && r.tier >= 1 && r.tier <= 3
+      ? `<button type="button" class="clickable" onclick="swOpen(${j}, '${esc(team)}', ${r.n})" aria-label="Cambiar ${esc(r.label)} por una tirada de tier ${r.tier + 1}" title="Cambiar por una tirada en la ruleta del Tier ${r.tier + 1}" style="padding: 2px 8px; border-radius: 10px; border: 1px solid rgba(76,201,240,0.5); background: transparent; color: #4CC9F0; ${SGF} font-size: 11px; font-weight: 700; white-space: nowrap;">↓ Cambiar a tier ${r.tier + 1}</button>` : '')).join('');
+  }
   const planTxt = pos => { const [a, r] = RW_PLAN[pos]; return `${a} a elegir` + (r ? ` + ${r} aleatoria${r > 1 ? 's' : ''}` : ''); };
-  function globalCard(j) {
-    const g = recGlobal(j);
-    return `<div style="${RCARD} padding: 16px 18px; display: flex; align-items: center; gap: 14px; flex: 1;">
+  function globalCard(j, flex = 1) {
+    const gs = recGlobals(j);
+    const val = gs.length > 1
+      ? `<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">${gs.map(g => `<span style="display: inline-block; padding: 6px 12px; border-radius: 12px; background: #232640; ${SGF} font-size: 15px; font-weight: 700; white-space: nowrap;">${esc(g)}</span>`).join('')}</div>`
+      : `<div style="${SGF} font-size: 20px; font-weight: 700; margin-top: 2px;${gs.length ? '' : ' color: #4A4E63;'}">${gs.length ? esc(gs[0]) : 'Sin definir en el sheet'}</div>`;
+    return `<div style="${RCARD} padding: 16px 18px; display: flex; align-items: center; gap: 14px; flex: ${flex};">
         <div style="width: 46px; height: 46px; border-radius: 12px; background: rgba(245,183,0,0.12); border: 1px solid rgba(245,183,0,0.4); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;">🎁</div>
-        <div>
-          <div style="font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px;">Recompensa global de la jornada · igual para los 4 equipos</div>
-          <div style="${SGF} font-size: 20px; font-weight: 700; margin-top: 2px;${g ? '' : ' color: #4A4E63;'}">${g ? esc(g) : 'Sin definir en el sheet'}</div>
+        <div style="min-width: 0;">
+          <div style="font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px;">${gs.length > 1 ? 'Recompensas globales de la jornada · iguales para los 4 equipos' : 'Recompensa global de la jornada · igual para los 4 equipos'}</div>
+          ${val}
         </div>
       </div>`;
   }
@@ -2116,25 +2268,30 @@
         ? `<div style="font-size: 30px;">🎡</div><div style="${SGF} font-size: 18px; font-weight: 700; color: #F5B700;">Jornada ${j} terminada</div><div style="font-size: 12px; color: #D8D9E3; max-width: 340px; line-height: 1.5;">Genera las ruletas de esta jornada: se sortea qué recompensa de cada tier cae en cada casilla. Se hace una sola vez y quedan iguales para los 4 equipos. Si después cambiáis las recompensas en el sheet, solo afecta a las jornadas que aún no tengan ruletas.</div>${btn(s.busy ? 'Generando…' : s.genAsk ? '¿Seguro? Generar ahora' : 'Generar ruletas', 'rwGenerate()', !s.busy)}`
         : `<div style="font-size: 30px;">🎡</div><div style="${SGF} font-size: 18px; font-weight: 700; color: #F5B700;">Ruletas de la Jornada ${j} listas</div><div style="font-size: 12px; color: #D8D9E3; max-width: 340px; line-height: 1.5;">Elige tu equipo, tira según tu puesto y confirma tus recompensas.</div>${btn('Tirar las ruletas', 'rwOpen()')}`;
     const nConf = order.filter(t => recGot(j, t)).length;
-    const reparto = wheels ? `${eyebrow('Lo que se ha llevado cada equipo', `Recompensa · ruleta de la que salió · tier · han confirmado ${nConf} de ${order.length}`)}
+    const reparto = wheels ? `${eyebrow('Lo que se ha llevado cada equipo', `Recompensa · ruleta de la que salió · tier · ${nConf === order.length ? '«↓ Cambiar» = cambio por una de tier inferior' : `han confirmado ${nConf} de ${order.length}`}`)}
       <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${order.map((t, i) => {
-        const got = recGot(j, t);
+        const got = recGot(j, t); const used = swapUsed(got);
         return `<div style="${RCARD} padding: 16px; display: flex; flex-direction: column; gap: 8px;">
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
             <div style="${SGF} font-size: 15px; font-weight: 700; color: ${i === 0 ? '#F5B700' : '#9296AD'};">${i + 1}º</div>${logo(t, 40)}
-            <div><div style="${SGF} font-size: 16px; font-weight: 700;">${esc(t)}</div><div style="font-size: 11px; color: #9296AD;">${esc(T(t).coach)} · ${planTxt(i + 1)}</div></div>
+            <div style="flex: 1; min-width: 0;"><div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;"><div style="${SGF} font-size: 16px; font-weight: 700;">${esc(t)}</div>${got ? `<div style="font-size: 11px; white-space: nowrap;">${used ? '<span style="color: #4CC9F0; font-weight: 600;">Cambio usado</span>' : '<span style="color: #9296AD;">1 cambio disponible</span>'}</div>` : ''}</div><div style="font-size: 11px; color: #9296AD;">${esc(T(t).coach)} · ${planTxt(i + 1)}</div></div>
           </div>
-          ${got ? got.rows.map(r => rewardRow(r)).join('') : '<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">Pendiente de tirar y confirmar</div>'}
+          ${got ? gotRows(j, t, got, !used) : '<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">Pendiente de tirar y confirmar</div>'}
         </div>`;
       }).join('')}</div>` : '';
     return head(sub0) + `<div style="padding: 22px 64px 40px; display: flex; flex-direction: column; gap: 18px;">
       ${s.done ? `<div style="background: rgba(76,201,240,0.08); border: 1px solid rgba(76,201,240,0.35); border-radius: 12px; padding: 10px 16px; ${SGF} font-size: 13px; font-weight: 700; color: #4CC9F0;">✓ ${esc(s.done)}</div>` : ''}
       ${s.msg ? `<div style="background: rgba(230,57,70,0.08); border: 1px solid rgba(230,57,70,0.4); border-radius: 12px; padding: 10px 16px; font-size: 13px; color: #F4F1EA;">${esc(s.msg)}</div>` : ''}
-      ${wheels ? `<div style="${gold} border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+      ${wheels && nConf < order.length ? `<div style="${gold} border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
         <div style="display: flex; align-items: center; gap: 12px;"><div style="font-size: 20px;">🎡</div><div><div style="${SGF} font-size: 14px; font-weight: 700; color: #F5B700;">Ruletas de la Jornada ${j} generadas · han confirmado ${nConf} de ${order.length} equipos</div><div style="font-size: 11px; color: #9296AD; margin-top: 2px;">Elige tu equipo, tira según tu puesto y confirma tus recompensas.</div></div></div>
         <div class="clickable" onclick="rwOpen()" style="padding: 9px 18px; border-radius: 20px; background: #F5B700; color: #12131C; ${SGF} font-size: 13px; font-weight: 700; white-space: nowrap;">Tirar las ruletas</div>
       </div>` : ''}
-      <div style="display: flex; gap: 18px;">${globalCard(j)}${rules}</div>
+      ${wheels && nConf === order.length ? `<div style="display: flex; gap: 18px;">${globalCard(j, 1.4)}
+        <div style="flex: 1; background: rgba(76,201,240,0.08); border: 1px solid rgba(76,201,240,0.35); border-radius: 16px; padding: 16px 18px; display: flex; flex-direction: column; justify-content: center; gap: 4px;">
+          <div style="${SGF} font-size: 15px; font-weight: 700; color: #4CC9F0;">Recompensas de la Jornada ${j} repartidas</div>
+          <div style="font-size: 11px; color: #9296AD; line-height: 1.5;">Cada equipo puede cambiar <b style="color: #D8D9E3;">1 recompensa por jornada</b> por una tirada en la ruleta del tier inmediatamente inferior (botón «↓ Cambiar»). Lo que salga sustituye a la original y queda marcado como cambiada. Las de tier 4 y las globales no se pueden cambiar.</div>
+        </div>
+      </div>` : `<div style="display: flex; gap: 18px;">${globalCard(j)}${rules}</div>`}
       ${reparto}
       ${eyebrow('Recompensas por tier', (wheels ? `Las que entraron en las ruletas de la Jornada ${j}` : 'Lo que puede tocar en las ruletas · se edita en la hoja Recompensas del sheet') + ' · las marcadas en dorado tienen anexo con la lista de objetos')}
       <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; align-items: start;">${tierCards}</div>
@@ -2145,7 +2302,80 @@
         </div>
         <div style="flex: 1; ${done ? gold : RCARD} border-radius: 16px; padding: 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center;">${cta}</div>
       </div>
-    </div>${anexoModal()}`;
+    </div>${anexoModal()}${swModal()}`;
+  }
+
+  /* ---- cambio por tier inferior (1 por equipo y jornada) ----
+     El sorteo lo hace el script del sheet (acción "cambio"); la ruleta solo enseña el resultado. */
+  window.swOpen = (j, team, n) => {
+    const got = recGot(j, team); const r = got && got.rows.find(x => x.n === n); if (!r || swapUsed(got)) return;
+    state.rw.sw = { j, team, n, label: r.label, tier: r.tier, wheel: r.wheel, boost: !!r.boost, items: recPool(j)[r.tier + 1] || [], ok: false, busy: false, rot: 0, result: null, msg: '' }; render();
+  };
+  window.swClose = () => { const sw = state.rw.sw; if (!sw || sw.busy || state.rw.spinning) return; state.rw.sw = null; render(); };
+  window.swCheck = v => { const sw = state.rw.sw; if (sw) { sw.ok = !!v; render(); } };
+  window.swSpin = async () => {
+    const s = state.rw; const sw = s.sw; if (!sw || !sw.ok || sw.busy || s.spinning || sw.result || !sw.items.length) return;
+    sw.busy = true; sw.msg = ''; render();
+    let d;
+    try { d = (await recPost({ action: 'cambio', scope: String(sw.j), team: sw.team, n: sw.n })).cambio; }
+    catch (err) { sw.busy = false; sw.msg = 'No se ha podido hacer el cambio: ' + (err.message || 'error de conexión'); render(); return; }
+    if (!d) { sw.busy = false; sw.msg = 'El script del sheet no ha devuelto el cambio: ¿está publicada la versión nueva de Codigo.gs?'; render(); return; }
+    sw.busy = false; let idx = sw.items.indexOf(d.label); if (idx < 0) { sw.items = sw.items.concat([d.label]); idx = sw.items.length - 1; render(); }
+    const seg = 360 / sw.items.length; const off = seg * 0.15 + rnd(Math.max(1, Math.round(seg * 7))) / 10;
+    const want = ((-(idx * seg + off)) % 360 + 360) % 360; const delta = ((want - (sw.rot % 360)) % 360 + 360) % 360;
+    sw.rot += 360 * 6 + delta; s.spinning = true;
+    const cv = document.getElementById('sw-wheel'); const btn = document.getElementById('sw-spin');
+    const ms = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) ? 500 : 4600;
+    if (btn) { btn.textContent = 'Girando…'; btn.style.background = '#232640'; btn.style.color = '#4A4E63'; }
+    if (cv) { cv.style.transition = `transform ${ms}ms cubic-bezier(0.12, 0.72, 0.08, 1)`; cv.style.transform = `rotate(${sw.rot}deg)`; }
+    setTimeout(() => { s.spinning = false; sw.rot = sw.rot % 360; sw.result = { label: d.label, tier: d.tier }; render(); voteLoad(true); }, ms + 80);
+  };
+  const shade = (hex, f) => { const v = String(hex).replace('#', ''); const c = i => Math.round(parseInt(v.substr(i, 2), 16) * f).toString(16).padStart(2, '0'); return '#' + c(0) + c(2) + c(4); };
+  function swDraw() {
+    const cv = document.getElementById('sw-wheel'); const sw = state.rw.sw; if (!cv || !sw || !sw.items.length) return;
+    const t = sw.tier + 1; const n = sw.items.length; const seg = 360 / n;
+    const ctx = cv.getContext('2d'); const W = cv.width, c = W / 2, R = c - 6; ctx.clearRect(0, 0, W, W);
+    sw.items.forEach((lab, i) => {
+      const a0 = (i * seg - 90) * Math.PI / 180, a1 = ((i + 1) * seg - 90) * Math.PI / 180;
+      ctx.beginPath(); ctx.moveTo(c, c); ctx.arc(c, c, R, a0, a1); ctx.closePath(); ctx.fillStyle = i % 2 ? shade(TCOL[t], 0.8) : TCOL[t]; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = '#12131C'; ctx.stroke();
+      ctx.save(); ctx.translate(c, c); ctx.rotate((a0 + a1) / 2); ctx.fillStyle = TINK[t];
+      let size = 34; ctx.font = `700 ${size}px 'Space Grotesk', sans-serif`;
+      while (size > 16 && ctx.measureText(lab).width > R - 110) { size--; ctx.font = `700 ${size}px 'Space Grotesk', sans-serif`; }
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(lab, R - 22, 1); ctx.restore();
+    });
+    ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.lineWidth = 8; ctx.strokeStyle = '#F4F1EA'; ctx.stroke();
+  }
+  function swModal() {
+    const sw = state.rw.sw; if (!sw) return '';
+    const t = sw.tier + 1; const spinning = state.rw.spinning; const can = sw.ok && !sw.busy && !spinning && sw.items.length;
+    const res = sw.result;
+    const action = res
+      ? `<div style="border-radius: 14px; padding: 12px 16px; background: #232640; border: 1px solid ${TCOL[res.tier] || TCOL[t]}; display: flex; align-items: center; gap: 12px;">${tchip(res.tier || t)}<div><div style="${SGF} font-size: 18px; font-weight: 700;">${sw.boost ? 'Boost + ' : ''}${esc(res.label)}</div><div style="font-size: 12px; color: #9296AD; margin-top: 2px;">Sustituye a ${esc(sw.label)} · ya está apuntado en el sheet</div></div></div>
+        <button type="button" class="clickable" onclick="swClose()" style="padding: 13px; border: none; border-radius: 14px; background: #F5B700; color: #12131C; ${SGF} font-size: 16px; font-weight: 700;">Hecho</button>`
+      : `<label style="display: flex; align-items: center; gap: 10px; background: #232640; border-radius: 10px; padding: 10px 12px; font-size: 13px; font-weight: 600; cursor: pointer;"><input type="checkbox" ${sw.ok ? 'checked' : ''} ${spinning || sw.busy ? 'disabled' : ''} onchange="swCheck(this.checked)" style="width: 18px; height: 18px; accent-color: #F5B700; margin: 0;"> Confirmo que soy ${esc(sw.team)}</label>
+        <button type="button" id="sw-spin" ${can ? 'class="clickable" onclick="swSpin()"' : 'disabled'} style="padding: 13px; border: none; border-radius: 14px; background: ${can ? '#F5B700' : '#232640'}; color: ${can ? '#12131C' : '#4A4E63'}; ${SGF} font-size: 16px; font-weight: 700;">${sw.busy ? 'Sorteando…' : spinning ? 'Girando…' : 'Tirar'}</button>
+        ${sw.msg ? `<div style="font-size: 12px; color: #E63946; line-height: 1.4;">${esc(sw.msg)}</div>` : ''}
+        <div style="font-size: 11px; color: #9296AD; line-height: 1.5;">Solo 1 cambio por equipo y jornada y no se puede deshacer. Si la recompensa tenía boost, la nueva lo mantiene.</div>
+        <button type="button" class="clickable" onclick="swClose()" style="align-self: flex-start; padding: 0; border: none; background: transparent; color: #9296AD; font-size: 12px; font-weight: 600;">Cancelar</button>`;
+    return `<div onclick="swClose()" style="position: fixed; inset: 0; z-index: 50; background: rgba(10,11,18,0.78); display: flex; align-items: center; justify-content: center;">
+      <div role="dialog" aria-label="Cambiar una recompensa" onclick="event.stopPropagation()" style="width: 760px; max-width: calc(100vw - 32px); box-sizing: border-box; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 24px; display: flex; gap: 24px; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">
+        <div style="position: relative; width: 380px; height: 380px; flex-shrink: 0; margin-top: 10px;">
+          <div style="position: absolute; left: 50%; top: -10px; margin-left: -12px; width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent; border-top: 24px solid #F4F1EA; z-index: 2;"></div>
+          <canvas id="sw-wheel" width="760" height="760" style="position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; transform: rotate(${sw.rot}deg);"></canvas>
+          <div style="position: absolute; left: 50%; top: 50%; width: 68px; height: 68px; margin: -34px 0 0 -34px; border-radius: 50%; background: #12131C; border: 3px solid #F4F1EA; box-sizing: border-box; display: flex; align-items: center; justify-content: center; ${SGF} font-size: 18px; font-weight: 700; z-index: 2;">T${t}</div>
+        </div>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px;">${logo(sw.team, 36)}<div style="${SGF} font-size: 20px; font-weight: 700;">Cambiar una recompensa</div></div>
+          <div style="background: #232640; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 11px; color: #9296AD; text-transform: uppercase; letter-spacing: 0.5px;">${esc(sw.team)} cambia</div>
+            <div style="display: flex; align-items: center; gap: 8px;"><div style="flex: 1; ${SGF} font-size: 16px; font-weight: 700;">${sw.boost ? BOOSTCHIP : ''}${esc(sw.label)}</div>${sw.wheel ? wchip('Ruleta ' + sw.wheel) : ''}${tchip(sw.tier)}</div>
+            <div style="font-size: 11px; color: #9296AD;">por una tirada en la ruleta del ${tchip(t)}</div>
+          </div>
+          <div style="font-size: 12px; color: #D8D9E3; line-height: 1.5;">${sw.items.length ? `La ruleta tiene todas las recompensas de tier ${t} de esta jornada, con la misma probabilidad. Lo que salga sustituye a la recompensa original y queda marcado como «cambiada».` : `No hay recompensas de tier ${t} en esta jornada.`}</div>
+          ${action}
+        </div>
+      </div>
+    </div>`;
   }
 
   /* ---- pantalla de tirar ---- */
@@ -2188,7 +2418,7 @@
       </div>`;
       const off = nc !== pc || nr !== pr || d.pending || d.boost; const can = d.rows.length > 0 && !s.busy;
       const cnt = (n, tot, lab, hi) => `<div style="background: #232640; border-radius: 12px; padding: 10px 12px;${hi ? ' border: 1px solid #F5B700;' : ''}"><div style="${SGF} font-size: 22px; font-weight: 700;${n > tot ? ' color: #E63946;' : hi ? ' color: #F5B700;' : ''}">${n} <span style="font-size: 13px; color: #9296AD; font-weight: 500;">de ${tot}</span></div><div style="font-size: 11px; color: #9296AD;">${lab}</div></div>`;
-      const g = recGlobal(j);
+      const gs = recGlobals(j).map(g => ({ label: g, tier: tierOf(j, g), wheel: '', kind: 'global' }));
       const right = `<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
         <div style="${RCARD} padding: 18px; display: flex; flex-direction: column; gap: 12px;">
           ${eyebrow('2 · Tus tiradas', `${esc(me)} quedó ${pos}º: ${RW_RULE[pos]}`)}
@@ -2197,7 +2427,7 @@
         </div>
         <div style="${RCARD} padding: 18px; display: flex; flex-direction: column; gap: 8px;">
           ${eyebrow('Lo que llevas', 'Sin confirmar todavía')}
-          ${g ? rewardRow({ label: g, tier: tierOf(j, g), wheel: '', kind: 'global' }) : ''}
+          ${globalsRow(gs)}
           ${d.rows.map((r, i) => rewardRow(r, i)).join('')}
           ${d.rows.length ? '' : '<div style="border: 1px dashed rgba(255,255,255,0.18); border-radius: 10px; padding: 9px 12px; color: #4A4E63; font-size: 13px;">Tu primera tirada…</div>'}
           <div ${can ? 'class="clickable" onclick="rwConfirm()"' : ''} style="margin-top: 6px; padding: 12px; border-radius: 12px; background: ${can ? (off && !s.sure ? '#232640' : '#F5B700') : '#232640'}; color: ${can ? (off && !s.sure ? '#F4F1EA' : '#12131C') : '#4A4E63'}; border: 1px solid ${can && off && !s.sure ? '#F5B700' : 'transparent'}; text-align: center; ${SGF} font-size: 14px; font-weight: 700;">${s.busy ? 'Confirmando…' : s.sure ? 'Confirmar igualmente' : 'Confirmar recompensas'}</div>
