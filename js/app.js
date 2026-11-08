@@ -1861,7 +1861,7 @@
   function draftLoad(j, team) {
     try { const d = JSON.parse(localStorage.getItem(rwKey(j, team)) || 'null'); if (d && Array.isArray(d.rows)) return d; } catch (e) { /* nada */ }
     const got = recGot(j, team);   // equipo ya confirmado: se parte de lo confirmado para poder corregirlo
-    if (got) return { rows: got.rows.filter(r => r.kind !== 'global').map(r => ({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind === 'aleatoria' ? 'aleatoria' : 'elegida', boost: !!r.boost, swap: r.swap || null })), pending: null, boost: false };
+    if (got) return { rows: got.rows.filter(r => r.kind !== 'global').map(r => ({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind === 'aleatoria' ? 'aleatoria' : 'elegida', boost: !!r.boost, swap: r.swap || null, note: r.note || '' })), pending: null, boost: false };
     return newDraft();
   }
   const draftSave = () => { const s = state.rw; if (!s.team) return; try { localStorage.setItem(rwKey(s.j, s.team), JSON.stringify(s.draft)); } catch (e) { /* nada */ } };
@@ -1964,7 +1964,7 @@
     const pos = voteOrder(s.j).indexOf(s.team) + 1; const { nc, nr } = rwCounts(s.draft); const [pc, pr] = RW_PLAN[pos];
     if ((nc !== pc || nr !== pr || s.draft.pending || s.draft.boost) && !s.sure) { s.sure = true; render(); return; }
     const rows = recGlobals(s.j).map(g => ({ label: g, tier: tierOf(s.j, g), wheel: '', kind: 'global', boost: false }));
-    for (const r of s.draft.rows) rows.push({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind, boost: !!r.boost, swap: r.swap || null });
+    for (const r of s.draft.rows) rows.push({ label: r.label, tier: r.tier, wheel: String(r.wheel), kind: r.kind, boost: !!r.boost, swap: r.swap || null, note: r.note || '' });
     s.busy = true; s.msg = ''; render();
     try {
       await recPost({ action: 'recompensas', scope: String(s.j), team: s.team, rows });
@@ -1979,13 +1979,13 @@
   const BOOSTCHIP = `<span style="display: inline-block; padding: 2px 7px; border-radius: 8px; background: #E63946; color: #F4F1EA; ${SGF} font-size: 10px; font-weight: 700; margin-right: 6px; vertical-align: 1px;">BOOST +</span>`;
   const eyebrow = (t, sub = '') => `<div style="display: flex; align-items: baseline; gap: 10px;"><div style="${SGF} font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #F5B700; white-space: nowrap;">${t}</div><div style="font-size: 11px; color: #9296AD;">${sub}</div></div>`;
   const CAMBCHIP = `<span style="display: inline-block; padding: 2px 7px; border-radius: 8px; background: #4CC9F0; color: #12131C; ${SGF} font-size: 10px; font-weight: 700; margin-right: 6px; vertical-align: 1px;">CAMBIADA</span>`;
-  function rewardRow(r, del, act = '') {
+  function rewardRow(r, del, act = '', undo = '') {
     const sw = r.swap;
     const where = r.kind === 'global' ? 'Global' : sw ? 'Cambio' : `Ruleta ${r.wheel}`;
     const extra = sw ? `Cambio por tier inferior · antes: ${esc(sw.label)}${sw.tier ? ` (Tier ${sw.tier})` : ''}` : r.kind === 'global' ? 'Recompensa global de la jornada' : r.kind === 'aleatoria' ? 'Tirada aleatoria' : '';
     const x = del !== undefined ? `<div class="clickable" onclick="rwDelete(${del})" title="Eliminar esta recompensa y repetir la tirada" style="width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(230,57,70,0.5); color: #E63946; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">✕</div>` : '';
     return `<div style="display: flex; align-items: center; gap: 10px; background: #232640; border-radius: 10px; padding: 9px 12px;${sw ? ' border: 1px solid rgba(76,201,240,0.45);' : ''}">
-        <div style="flex: 1; min-width: 0;"><div style="font-size: 14px; font-weight: 700;">${sw ? CAMBCHIP : ''}${r.boost ? BOOSTCHIP : ''}${esc(r.label)}</div>${extra ? `<div style="font-size: 10px; color: #9296AD; margin-top: 2px;">${extra}</div>` : ''}${act ? `<div style="margin-top: 5px;">${act}</div>` : ''}</div>
+        <div style="flex: 1; min-width: 0;"><div style="font-size: 14px; font-weight: 700;">${sw ? (undo ? CAMBCHIP.replace('<span ', `<span ondblclick="${undo}" `) : CAMBCHIP) : ''}${r.boost ? BOOSTCHIP : ''}${esc(r.label)}</div>${extra ? `<div style="font-size: 10px; color: #9296AD; margin-top: 2px;">${extra}</div>` : ''}${r.note ? `<div style="font-size: 10px; color: #F5B700; margin-top: 3px; line-height: 1.35;">↪ ${esc(r.note)}</div>` : ''}${act ? `<div style="margin-top: 5px;">${act}</div>` : ''}</div>
         ${wchip(where)}${r.tier >= 1 && r.tier <= 4 ? tchip(r.tier) : ''}${x}
       </div>`;
   }
@@ -2000,10 +2000,10 @@
   }
   // Recompensas confirmadas de un equipo; con canSwap, cada una de tier 1-3 lleva "↓ Cambiar"
   const swapUsed = got => !!(got && got.rows.some(r => r.swap));
-  function gotRows(j, team, got, canSwap) {
+  function gotRows(j, team, got, canSwap, undo = false) {
     const glob = got.rows.filter(r => r.kind === 'global'), rest = got.rows.filter(r => r.kind !== 'global');
     return globalsRow(glob) + rest.map(r => rewardRow(r, undefined, canSwap && r.tier >= 1 && r.tier <= 3
-      ? `<button type="button" class="clickable" onclick="swOpen(${j}, '${esc(team)}', ${r.n})" aria-label="Cambiar ${esc(r.label)} por una tirada de tier ${r.tier + 1}" title="Cambiar por una tirada en la ruleta del Tier ${r.tier + 1}" style="padding: 2px 8px; border-radius: 10px; border: 1px solid rgba(76,201,240,0.5); background: transparent; color: #4CC9F0; ${SGF} font-size: 11px; font-weight: 700; white-space: nowrap;">↓ Cambiar a tier ${r.tier + 1}</button>` : '')).join('');
+      ? `<button type="button" class="clickable" onclick="swOpen(${j}, '${esc(team)}', ${r.n})" aria-label="Cambiar ${esc(r.label)} por una tirada de tier ${r.tier + 1}" title="Cambiar por una tirada en la ruleta del Tier ${r.tier + 1}" style="padding: 2px 8px; border-radius: 10px; border: 1px solid rgba(76,201,240,0.5); background: transparent; color: #4CC9F0; ${SGF} font-size: 11px; font-weight: 700; white-space: nowrap;">↓ Cambiar a tier ${r.tier + 1}</button>` : '', undo && r.swap ? `swUndoAsk(${j}, '${esc(team)}', ${r.n})` : '')).join('');
   }
   const planTxt = pos => { const [a, r] = RW_PLAN[pos]; return `${a} a elegir` + (r ? ` + ${r} aleatoria${r > 1 ? 's' : ''}` : ''); };
   function globalCard(j, flex = 1) {
@@ -2276,7 +2276,7 @@
             <div style="${SGF} font-size: 15px; font-weight: 700; color: ${i === 0 ? '#F5B700' : '#9296AD'};">${i + 1}º</div>${logo(t, 40)}
             <div style="flex: 1; min-width: 0;"><div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;"><div style="${SGF} font-size: 16px; font-weight: 700;">${esc(t)}</div>${got ? `<div style="font-size: 11px; white-space: nowrap;">${used ? '<span style="color: #4CC9F0; font-weight: 600;">Cambio usado</span>' : '<span style="color: #9296AD;">1 cambio disponible</span>'}</div>` : ''}</div><div style="font-size: 11px; color: #9296AD;">${esc(T(t).coach)} · ${planTxt(i + 1)}</div></div>
           </div>
-          ${got ? gotRows(j, t, got, !used) : '<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">Pendiente de tirar y confirmar</div>'}
+          ${got ? gotRows(j, t, got, !used, true) : '<div style="font-size: 12px; color: #4A4E63; padding: 6px 0;">Pendiente de tirar y confirmar</div>'}
         </div>`;
       }).join('')}</div>` : '';
     return head(sub0) + `<div style="padding: 22px 64px 40px; display: flex; flex-direction: column; gap: 18px;">
@@ -2302,7 +2302,7 @@
         </div>
         <div style="flex: 1; ${done ? gold : RCARD} border-radius: 16px; padding: 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center;">${cta}</div>
       </div>
-    </div>${anexoModal()}${swModal()}`;
+    </div>${anexoModal()}${swModal()}${undoModal()}`;
   }
 
   /* ---- cambio por tier inferior (1 por equipo y jornada) ----
@@ -2330,6 +2330,36 @@
     if (cv) { cv.style.transition = `transform ${ms}ms cubic-bezier(0.12, 0.72, 0.08, 1)`; cv.style.transform = `rotate(${sw.rot}deg)`; }
     setTimeout(() => { s.spinning = false; sw.rot = sw.rot % 360; sw.result = { label: d.label, tier: d.tier }; render(); voteLoad(true); }, ms + 80);
   };
+  // Opción oculta: doble clic en la etiqueta CAMBIADA de la pestaña Recompensas → deshacer ese cambio
+  window.swUndoAsk = (j, team, n) => {
+    const got = recGot(j, team); const r = got && got.rows.find(x => x.n === n); if (!r || !r.swap) return;
+    state.rw.undo = { j, team, n, now: r.label, nowTier: r.tier, before: r.swap.label, beforeTier: r.swap.tier, busy: false, msg: '' }; render();
+  };
+  window.swUndoClose = () => { const u = state.rw.undo; if (u && u.busy) return; state.rw.undo = null; render(); };
+  window.swUndo = async () => {
+    const u = state.rw.undo; if (!u || u.busy) return; u.busy = true; u.msg = ''; render();
+    try { await recPost({ action: 'deshacerCambio', scope: String(u.j), team: u.team, n: u.n }); }
+    catch (err) { u.busy = false; u.msg = 'No se ha podido deshacer: ' + (err.message || 'error de conexión'); render(); return; }
+    state.rw.undo = null; state.rw.done = `Cambio de ${u.team} deshecho: vuelve ${u.before}`; await voteLoad(true); render();
+  };
+  function undoModal() {
+    const u = state.rw.undo; if (!u) return '';
+    return `<div onclick="swUndoClose()" style="position: fixed; inset: 0; z-index: 50; background: rgba(10,11,18,0.78); display: flex; align-items: center; justify-content: center;">
+      <div role="dialog" aria-label="Deshacer un cambio" onclick="event.stopPropagation()" style="width: 460px; max-width: calc(100vw - 32px); box-sizing: border-box; background: #1B1D2B; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 26px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">
+        <div style="display: flex; align-items: center; gap: 10px;">${logo(u.team, 36)}<div style="${SGF} font-size: 20px; font-weight: 700;">¿Deshacer el cambio de ${esc(u.team)}?</div></div>
+        <div style="background: #232640; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+          <div style="display: flex; align-items: center; gap: 8px;"><span style="color: #9296AD; width: 56px;">Ahora</span><span style="flex: 1; font-weight: 700; text-decoration: line-through; color: #9296AD;">${esc(u.now)}</span>${u.nowTier ? tchip(u.nowTier) : ''}</div>
+          <div style="display: flex; align-items: center; gap: 8px;"><span style="color: #9296AD; width: 56px;">Vuelve</span><span style="flex: 1; font-weight: 700;">${esc(u.before)}</span>${u.beforeTier ? tchip(u.beforeTier) : ''}</div>
+        </div>
+        <div style="font-size: 12px; color: #9296AD; line-height: 1.5;">${esc(u.team)} recupera su cambio de esta jornada y podrá volver a usarlo.</div>
+        ${u.msg ? `<div style="font-size: 12px; color: #E63946;">${esc(u.msg)}</div>` : ''}
+        <div style="display: flex; gap: 10px;">
+          <button type="button" class="clickable" onclick="swUndoClose()" style="flex: 1; padding: 11px; border: none; border-radius: 12px; background: #232640; color: #D8D9E3; ${SGF} font-size: 13px; font-weight: 700;">Cancelar</button>
+          <button type="button" ${u.busy ? 'disabled' : 'class="clickable" onclick="swUndo()"'} style="flex: 1.6; padding: 11px; border: none; border-radius: 12px; background: ${u.busy ? '#232640' : '#F5B700'}; color: ${u.busy ? '#4A4E63' : '#12131C'}; ${SGF} font-size: 13px; font-weight: 700;">${u.busy ? 'Deshaciendo…' : 'Deshacer cambio'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
   const shade = (hex, f) => { const v = String(hex).replace('#', ''); const c = i => Math.round(parseInt(v.substr(i, 2), 16) * f).toString(16).padStart(2, '0'); return '#' + c(0) + c(2) + c(4); };
   function swDraw() {
     const cv = document.getElementById('sw-wheel'); const sw = state.rw.sw; if (!cv || !sw || !sw.items.length) return;
